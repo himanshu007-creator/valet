@@ -1,0 +1,5 @@
+{
+  "name": "valet",
+  "private": true,
+  "workspaces": ["server", "web", "runner"]
+}
