@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: valet-server
+    runtime: node
+    region: singapore
+    plan: starter
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm run start --workspace=server
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # everything else (BOLNA_API_KEY, GROQ_API_KEY, LINEAR_API_KEY, DEEPGRAM_API_KEY,
+      # CARTESIA_API_KEY, GH_TOKEN, TWILIO_*, RUNNER_TOKEN, ALLOWED_CALLER_NUMBER,
+      # SUPABASE_*, DATABASE_URL, BOLNA_AGENT_ID, ALLOWED_WEB_ORIGINS, PUBLIC_URL) is set
+      # manually in the Render dashboard — never committed. PUBLIC_URL and
+      # ALLOWED_WEB_ORIGINS get the real Render/Vercel URLs once both are deployed.

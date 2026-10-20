@@ -13,8 +13,15 @@ Research the codebase for this ticket, then write `docs/impl/{{TICKET_ID}}.md` w
 ## Tests
 ## Open questions
 
-At most one open question, phrased as a yes/no or A/B choice. If there are none, write "None."
+At most one open question — either a genuine content ambiguity, or something you'd want explicit
+confirmation for before anyone acts on this doc (a destructive or irreversible choice, a real
+tradeoff with no clearly-right answer). Phrase it as 2 to 3 numbered options, each **4 to 5 words
+max**, hyper precise, plus always leave room for a custom answer. Example of the right length:
+"(1) stream like now. (2) buffer instead. Or tell me what you'd prefer."
+Do not write long sentences or explain the tradeoffs in the question itself — that's what the
+Risks section is for. If there are none, write "None."
 
-When the file is written, print exactly one of these as the last line of your final message:
-- `VALET_DONE` if there are no open questions
-- `VALET_BLOCKED: <the question>` if there is one
+When the file is written, your final message must end with exactly one literal line, with the
+real question substituted in (never print the word "question" as a placeholder):
+- `VALET_DONE` if there were no open questions
+- `VALET_BLOCKED: ` followed immediately by your actual question and its options

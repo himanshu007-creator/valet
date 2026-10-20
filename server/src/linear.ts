@@ -1,6 +1,7 @@
 import { env } from "./env.ts";
 
 export type Issue = {
+  id: string;
   identifier: string;
   title: string;
   description: string | null;
@@ -12,7 +13,7 @@ const QUERY = `
   query {
     viewer {
       assignedIssues(filter: { state: { type: { nin: ["completed", "canceled"] } } }) {
-        nodes { identifier title description priority dueDate }
+        nodes { id identifier title description priority dueDate }
       }
     }
   }
@@ -28,6 +29,21 @@ export async function fetchAssignedIssues(): Promise<Issue[]> {
   if (!res.ok || json.errors) throw new Error(`linear fetch failed: ${JSON.stringify(json.errors ?? json)}`);
   const issues: Issue[] = json.data.viewer.assignedIssues.nodes;
   return sortByPriorityAndDue(issues);
+}
+
+export async function postComment(issueId: string, body: string): Promise<void> {
+  const mutation = `
+    mutation($issueId: String!, $body: String!) {
+      commentCreate(input: { issueId: $issueId, body: $body }) { success }
+    }
+  `;
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: { Authorization: env.linearApiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ query: mutation, variables: { issueId, body } }),
+  });
+  const json = await res.json();
+  if (!res.ok || json.errors) throw new Error(`linear comment failed: ${JSON.stringify(json.errors ?? json)}`);
 }
 
 export function sortByPriorityAndDue(issues: Issue[]): Issue[] {

@@ -25,3 +25,8 @@ export function prefetchPriorities() {
   if (!inflight) inflight = refresh().finally(() => (inflight = null));
   inflight.catch((err) => console.error("prefetch priorities failed", err));
 }
+
+export async function getIssueById(ticketId: string): Promise<Issue | undefined> {
+  if (!cached || Date.now() - cached.at >= TTL_MS) await getPrioritiesSummary();
+  return cached!.issues.find((i) => i.identifier.toLowerCase() === ticketId.toLowerCase());
+}

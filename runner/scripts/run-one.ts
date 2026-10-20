@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { runJob } from "../src/job.ts";
+import { resolveRepo } from "../src/repo.ts";
 
 const args = process.argv.slice(2).filter((a) => a !== "--headless");
 const [id, title, ...descParts] = args;
@@ -9,11 +11,8 @@ if (!id || !title) {
   process.exit(1);
 }
 
-const repoRoot = process.env.TARGET_REPO_PATH;
-if (!repoRoot) {
-  console.error("set TARGET_REPO_PATH to the git repo the worktree should branch from");
-  process.exit(1);
-}
-
-const result = await runJob(repoRoot, { id, title, description: descParts.join(" ") || title }, headless);
+const ticket = { id, title, description: descParts.join(" ") || title };
+const resolved = await resolveRepo(ticket);
+console.log("resolved to", resolved);
+const result = await runJob(resolved, ticket, randomUUID(), headless);
 console.log(result);

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.valet.runner</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>--env-file=__RUNNER_DIR__/.env</string>
+    <string>__RUNNER_DIR__/../node_modules/.bin/tsx</string>
+    <string>__RUNNER_DIR__/src/index.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__RUNNER_DIR__</string>
+
+  <!-- launchd's default PATH is just /usr/bin:/bin:/usr/sbin:/sbin — opencode, gh and node
+       itself (installed via Homebrew) aren't on it unless we say so explicitly. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__USER_PATH__</string>
+  </dict>
+
+  <!-- the whole point: launchd restarts it if it ever dies, and it's there on every login -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__RUNNER_DIR__/.valet-runner.log</string>
+  <key>StandardErrorPath</key>
+  <string>__RUNNER_DIR__/.valet-runner.log</string>
+
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+</dict>
+</plist>

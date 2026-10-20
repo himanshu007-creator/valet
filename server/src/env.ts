@@ -15,7 +15,11 @@ export const env = {
   bolnaApiKey: required("BOLNA_API_KEY"),
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   linearApiKey: process.env.LINEAR_API_KEY ?? "",
+  deepgramApiKey: process.env.DEEPGRAM_API_KEY ?? "",
+  cartesiaApiKey: process.env.CARTESIA_API_KEY ?? "",
   runnerToken: required("RUNNER_TOKEN"),
   allowedCallerNumber: process.env.ALLOWED_CALLER_NUMBER ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? "",
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? "",
 };

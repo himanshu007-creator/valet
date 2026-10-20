@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { sortByPriorityAndDue, type Issue } from "./linear.ts";
 
 function issue(identifier: string, priority: number, dueDate: string | null = null): Issue {
-  return { identifier, title: identifier, description: null, priority, dueDate };
+  return { id: identifier, identifier, title: identifier, description: null, priority, dueDate };
 }
 
 test("urgent before low priority regardless of input order", () => {
