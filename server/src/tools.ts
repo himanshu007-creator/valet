@@ -3,7 +3,7 @@ import { sql } from "./db.ts";
 import { runnerConnected, dispatchJob, dispatchAnswer, dispatchImplement } from "./runner-link.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
 import { createIssue, archiveIssue } from "./linear.ts";
-import { classifyIntent, matchTicket, BAND } from "./router.ts";
+import { classifyAndMatch, matchTicket, BAND } from "./router.ts";
 import { env } from "./env.ts";
 
 // shared by the Bolna phone tools (HTTP) and desk mode's local tool-calling loop —
@@ -54,10 +54,10 @@ async function checkPrStatus(prUrl: string): Promise<string | null> {
   const [, owner, repo, number] = m;
   const headers = { Authorization: `Bearer ${env.githubToken}`, Accept: "application/vnd.github+json" };
   try {
-    const prRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, { headers });
+    const prRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, { headers, signal: AbortSignal.timeout(3000) });
     if (!prRes.ok) return null;
     const pr = await prRes.json();
-    const checksRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${pr.head.sha}/check-runs`, { headers });
+    const checksRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${pr.head.sha}/check-runs`, { headers, signal: AbortSignal.timeout(3000) });
     if (!checksRes.ok) return null;
     const { check_runs } = await checksRes.json();
     if (!check_runs?.length) return null;
@@ -105,12 +105,18 @@ export async function toolAnswerQuestion(answer: string): Promise<string> {
   let job = blocked[0];
   if (blocked.length > 1) {
     const candidates = blocked.map((b) => ({ id: b.ticket_id, title: b.question ?? b.title }));
-    const { id, confidence } = await matchTicket(answer, candidates);
-    if (!id || confidence < BAND.LOW) {
+    try {
+      const { id, confidence } = await matchTicket(answer, candidates);
+      if (!id || confidence < BAND.LOW) {
+        const names = blocked.map((b) => `${b.ticket_id} — ${b.title}`).join(", or ");
+        return `I have more than one open question — which ticket is this for: ${names}?`;
+      }
+      job = blocked.find((b) => b.ticket_id === id)!;
+    } catch (err) {
+      console.error("jev disambiguation failed", err);
       const names = blocked.map((b) => `${b.ticket_id} — ${b.title}`).join(", or ");
-      return `I have more than one open question — which ticket is this for: ${names}?`;
+      return `I have more than one open question and can't tell which this is for right now — which ticket: ${names}?`;
     }
-    job = blocked.find((b) => b.ticket_id === id)!;
   }
 
   await sql`update jobs set answer = ${answer} where id = ${job.id}`;
@@ -161,14 +167,22 @@ export async function toolHandleTask(request: string): Promise<string> {
 
   const issues = await getCachedIssues();
   const candidates = issues.map((i) => ({ id: i.identifier, title: i.title }));
-  const { intent } = await classifyIntent(text);
+
+  let routed;
+  try {
+    // one Jev call, not two — intent + ticket match evaluated together, see router.ts.
+    routed = await classifyAndMatch(text, candidates);
+  } catch (err) {
+    console.error("jev routing failed", err);
+    return "Sorry, I'm having trouble understanding that right now — could you try again in a moment?";
+  }
+  const { intent, ticketId: id, ticketConfidence: confidence } = routed;
 
   switch (intent) {
     case "overview":
       return toolGetStatusAll();
 
     case "create": {
-      const { id, confidence } = await matchTicket(text, candidates);
       if (id && confidence >= BAND.LOW) {
         const existing = candidates.find((c) => c.id === id);
         return `That sounds like it might already be ${id} — "${existing?.title}". Want me to start that instead?`;
@@ -180,13 +194,11 @@ export async function toolHandleTask(request: string): Promise<string> {
     }
 
     case "probe": {
-      const { id } = await matchTicket(text, candidates);
       if (!id) return "I couldn't find a matching ticket to check on.";
       return toolProbeTask(id);
     }
 
     case "delete": {
-      const { id } = await matchTicket(text, candidates);
       if (!id) return "I couldn't find a matching ticket to cancel.";
       const issue = await getIssueById(id);
       if (!issue) return "I couldn't find a matching ticket to cancel.";
@@ -196,7 +208,6 @@ export async function toolHandleTask(request: string): Promise<string> {
 
     case "execute":
     default: {
-      const { id, confidence } = await matchTicket(text, candidates);
       if (id && confidence >= BAND.LOW) return toolOrder(id);
       // journey 3, "unsure": no confident existing match — create then execute.
       if (!runnerConnected()) return "The runner on your Mac isn't connected right now, so I can't start that.";

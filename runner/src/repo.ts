@@ -9,25 +9,32 @@ import type { Ticket } from "./job.ts";
 const exec = promisify(execFile);
 
 const typesafeApiKey = process.env.TYPESAFE_API_KEY;
-const jev = typesafeApiKey ? new TypeSafeClient({ apiKey: typesafeApiKey, defaultModel: "jev-latest" }) : null;
+const jev = typesafeApiKey ? new TypeSafeClient({ apiKey: typesafeApiKey, defaultModel: "jev-latest", timeout: 4000 }) : null;
 
 // Jev picks the best-matching repo when the substring heuristic finds more than one
 // plausible candidate (or none) — only called when there's real ambiguity to resolve, so
-// the common one-obvious-match case still skips the network round trip entirely.
+// the common one-obvious-match case still skips the network round trip entirely. A Jev
+// outage degrades to "no match" (same as today's behavior when nothing matches), not a
+// crashed job — resolveRepo falls through to creating a new repo either way.
 async function jevPick(ticket: Ticket, candidates: string[]): Promise<string | undefined> {
   if (!jev || candidates.length === 0) return undefined;
-  const res = await jev.systemOne({
-    state: `${ticket.title}\n\n${ticket.description}`,
-    questions: {
-      repo: choice("Which repo does this ticket belong in, if any", {
-        ...Object.fromEntries(candidates.map((c) => [c, c])),
-        none: "None of these repos are a good fit",
-      }),
-    },
-  });
-  const answer = res.answers.repo;
-  console.log(`[jev] repo -> ${answer.choice} (confidence ${answer.confidence.toFixed(2)})`);
-  return answer.choice === "none" || answer.confidence < 0.5 ? undefined : answer.choice;
+  try {
+    const res = await jev.systemOne({
+      state: `${ticket.title}\n\n${ticket.description}`,
+      questions: {
+        repo: choice("Which repo does this ticket belong in, if any", {
+          ...Object.fromEntries(candidates.map((c) => [c, c])),
+          none: "None of these repos are a good fit",
+        }),
+      },
+    });
+    const answer = res.answers.repo;
+    console.log(`[jev] repo -> ${answer.choice} (confidence ${answer.confidence.toFixed(2)})`);
+    return answer.choice === "none" || answer.confidence < 0.5 ? undefined : answer.choice;
+  } catch (err) {
+    console.error("jev repo pick failed", err);
+    return undefined;
+  }
 }
 
 const SIDEPROJECTS_DIR = process.env.SIDEPROJECTS_DIR ?? path.join(process.env.HOME!, "Desktop", "sideprojects");
