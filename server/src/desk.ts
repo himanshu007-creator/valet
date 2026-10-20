@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
 import { env } from "./env.ts";
-import { toolGetPriorities, toolOrder, toolGetStatus, toolAnswerQuestion, toolImplement } from "./tools.ts";
+import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement } from "./tools.ts";
 
 // Auricle (web/) speaks plain OpenAI-compatible STT/chat/TTS, no tool calling of its own.
 // This is the proxy: one base URL, three routes, backed by Deepgram + Groq (with our tools
@@ -13,12 +13,11 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "order",
-      description: "Start implementation-doc work on the given tickets",
-      parameters: { type: "object", properties: { tickets: { type: "string", description: "comma-separated ticket ids" } }, required: ["tickets"] },
+      name: "handle_task",
+      description: "Handle any task-management request: starting work on a ticket, creating a new one, checking on one, cancelling one, or an overview of what's in progress. Pass the caller's request through close to verbatim.",
+      parameters: { type: "object", properties: { request: { type: "string", description: "what the caller asked for, in their own words" } }, required: ["request"] },
     },
   },
-  { type: "function", function: { name: "get_status", description: "Get the status of in-progress or recent ticket jobs", parameters: { type: "object", properties: {} } } },
   {
     type: "function",
     function: {
@@ -41,10 +40,8 @@ async function runTool(name: string, args: Record<string, string>): Promise<stri
   switch (name) {
     case "get_priorities":
       return toolGetPriorities();
-    case "order":
-      return toolOrder(args.tickets ?? "");
-    case "get_status":
-      return toolGetStatus();
+    case "handle_task":
+      return toolHandleTask(args.request ?? "");
     case "answer_question":
       return toolAnswerQuestion(args.answer ?? "");
     case "implement":

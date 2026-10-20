@@ -30,11 +30,14 @@ self.addEventListener("push", (event) => {
       body: data.body,
       icon: "/icon-192.png",
       badge: "/icon-192.png",
+      data: { ticketId: data.ticketId },
     }),
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(self.clients.openWindow("/"));
+  const ticketId = event.notification.data?.ticketId;
+  const url = ticketId ? `/app?job=${encodeURIComponent(ticketId)}` : "/app";
+  event.waitUntil(self.clients.openWindow(url));
 });

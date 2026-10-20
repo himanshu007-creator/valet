@@ -4,7 +4,13 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 type AuthState = { checked: boolean; username: string | null };
 
-async function api(path: string, body?: unknown) {
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+export async function api(path: string, body?: unknown) {
   const res = await fetch(`${API_URL}${path}`, {
     method: body ? "POST" : "GET",
     credentials: "include",
@@ -12,7 +18,7 @@ async function api(path: string, body?: unknown) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error ?? `request failed (${res.status})`);
+  if (!res.ok) throw new ApiError(json.error ?? `request failed (${res.status})`, res.status);
   return json;
 }
 

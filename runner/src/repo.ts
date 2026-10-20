@@ -3,9 +3,32 @@ import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
+import { TypeSafeClient, choice } from "@typesafe-ai/sdk";
 import type { Ticket } from "./job.ts";
 
 const exec = promisify(execFile);
+
+const typesafeApiKey = process.env.TYPESAFE_API_KEY;
+const jev = typesafeApiKey ? new TypeSafeClient({ apiKey: typesafeApiKey, defaultModel: "jev-latest" }) : null;
+
+// Jev picks the best-matching repo when the substring heuristic finds more than one
+// plausible candidate (or none) — only called when there's real ambiguity to resolve, so
+// the common one-obvious-match case still skips the network round trip entirely.
+async function jevPick(ticket: Ticket, candidates: string[]): Promise<string | undefined> {
+  if (!jev || candidates.length === 0) return undefined;
+  const res = await jev.systemOne({
+    state: `${ticket.title}\n\n${ticket.description}`,
+    questions: {
+      repo: choice("Which repo does this ticket belong in, if any", {
+        ...Object.fromEntries(candidates.map((c) => [c, c])),
+        none: "None of these repos are a good fit",
+      }),
+    },
+  });
+  const answer = res.answers.repo;
+  console.log(`[jev] repo -> ${answer.choice} (confidence ${answer.confidence.toFixed(2)})`);
+  return answer.choice === "none" || answer.confidence < 0.5 ? undefined : answer.choice;
+}
 
 const SIDEPROJECTS_DIR = process.env.SIDEPROJECTS_DIR ?? path.join(process.env.HOME!, "Desktop", "sideprojects");
 const PLANS_DIR = path.join(SIDEPROJECTS_DIR, "plans");
@@ -34,15 +57,24 @@ function keywordsFrom(text: string): string[] {
   return [...new Set((text.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) ?? []).filter((w) => !STOP.has(w)))];
 }
 
-function findMatch(candidates: string[], keywords: string[]): string | undefined {
+function findMatches(candidates: string[], keywords: string[]): string[] {
+  const hits = new Set<string>();
   for (const kw of keywords) {
-    const hit = candidates.find((c) => {
+    for (const c of candidates) {
       const lc = c.toLowerCase();
-      return lc === kw || lc.includes(kw) || kw.includes(lc);
-    });
-    if (hit) return hit;
+      if (lc === kw || lc.includes(kw) || kw.includes(lc)) hits.add(c);
+    }
   }
-  return undefined;
+  return [...hits];
+}
+
+// one obvious substring match: fast path, no network call. Zero or multiple matches: let
+// Jev pick from the full candidate list, since the substring heuristic can't tell "no match"
+// from "ambiguous match" on its own (see the ponytail note above).
+async function resolveMatch(ticket: Ticket, candidates: string[], keywords: string[]): Promise<string | undefined> {
+  const hits = findMatches(candidates, keywords);
+  if (hits.length === 1) return hits[0];
+  return jevPick(ticket, candidates);
 }
 
 async function listLocalRepos(): Promise<string[]> {
@@ -72,11 +104,11 @@ export async function resolveRepo(ticket: Ticket): Promise<ResolvedRepo> {
   const keywords = keywordsFrom(`${ticket.title} ${ticket.description}`);
 
   const local = await listLocalRepos();
-  const localMatch = findMatch(local, keywords);
+  const localMatch = await resolveMatch(ticket, local, keywords);
   if (localMatch) return { repoPath: path.join(SIDEPROJECTS_DIR, localMatch), isPlan: false };
 
   const remote = await listGithubRepos().catch(() => []);
-  const remoteMatch = findMatch(remote, keywords);
+  const remoteMatch = await resolveMatch(ticket, remote, keywords);
   if (remoteMatch) {
     const dest = path.join(SIDEPROJECTS_DIR, remoteMatch);
     await exec("gh", ["repo", "clone", `${GH_OWNER}/${remoteMatch}`, dest]);

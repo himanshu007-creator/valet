@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence } from "motion/react";
 import DeskMode from "./DeskMode.tsx";
 import { useAuth, LoginForm } from "./Auth.tsx";
@@ -7,6 +8,7 @@ import { History } from "./History.tsx";
 import { Stats } from "./Stats.tsx";
 import { useLenis } from "./useLenis.ts";
 import { PushToggle } from "./PushToggle.tsx";
+import { Landing } from "./Landing.tsx";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
@@ -41,7 +43,16 @@ function useDashboardSocket(onStatus: (s: Status) => void) {
 function Dashboard({ username, onLogout }: { username: string; onLogout: () => void }) {
   const [priorities, setPriorities] = useState("");
   const [status, setStatus] = useState<Status>({ order: null });
-  const [tab, setTab] = useState<Tab>("today");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = (searchParams.get("tab") as Tab) ?? "today";
+  const highlightJob = searchParams.get("job");
+
+  const setTab = (t: Tab) => {
+    const next = new URLSearchParams(searchParams);
+    if (t === "today") next.delete("tab");
+    else next.set("tab", t);
+    setSearchParams(next, { replace: true });
+  };
 
   useDashboardSocket(setStatus);
   useLenis();
@@ -56,6 +67,12 @@ function Dashboard({ username, onLogout }: { username: string; onLogout: () => v
     const id = setInterval(fetchPriorities, 60_000); // matches the server's cache TTL
     return () => clearInterval(id);
   }, []);
+
+  // a push notification's "job" deep link: jump straight to the ticket it's about.
+  useEffect(() => {
+    if (!highlightJob) return;
+    document.getElementById(`job-${highlightJob}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightJob, status]);
 
   return (
     <main className="page">
@@ -90,7 +107,7 @@ function Dashboard({ username, onLogout }: { username: string; onLogout: () => v
               <ul className="jobs">
                 <AnimatePresence initial={false}>
                   {status.order.jobs.map((job) => (
-                    <JobCard key={job.id} job={job} />
+                    <JobCard key={job.id} job={job} highlighted={job.ticket_id === highlightJob} />
                   ))}
                 </AnimatePresence>
               </ul>
@@ -120,6 +137,16 @@ export default function App() {
   const { checked, username, setState, logout } = useAuth();
 
   if (!checked) return null;
-  if (!username) return <LoginForm onAuthed={(u) => setState({ checked: true, username: u })} />;
-  return <Dashboard username={username} onLogout={logout} />;
+
+  return (
+    <Routes>
+      <Route path="/" element={<Landing authed={!!username} />} />
+      <Route
+        path="/login"
+        element={username ? <Navigate to="/app" replace /> : <LoginForm onAuthed={(u) => setState({ checked: true, username: u })} />}
+      />
+      <Route path="/app" element={username ? <Dashboard username={username} onLogout={logout} /> : <Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }

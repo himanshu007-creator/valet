@@ -106,7 +106,7 @@ async function handleRunnerMessage(raw: string) {
   const summary = parts.join(" ");
   const question = blocked[0]?.question;
 
-  await notifyPush("VALET", summary).catch((err) => console.error("push notify failed", err));
+  await notifyPush("VALET", summary, job.ticket_id).catch((err) => console.error("push notify failed", err));
 
   if (env.allowedCallerNumber) {
     await triggerCallback(env.allowedCallerNumber, summary, question).catch((err) =>

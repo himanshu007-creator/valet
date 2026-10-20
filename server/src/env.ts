@@ -22,4 +22,6 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? "",
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? "",
+  typesafeApiKey: process.env.TYPESAFE_API_KEY ?? "",
+  githubToken: process.env.GH_TOKEN ?? "",
 };

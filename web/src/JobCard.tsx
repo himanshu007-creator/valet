@@ -23,9 +23,10 @@ const STATUS_LABEL: Record<string, string> = {
 
 const SPRING = { type: "spring" as const, stiffness: 260, damping: 28 };
 
-export function JobCard({ job }: { job: Job }) {
+export function JobCard({ job, highlighted }: { job: Job; highlighted?: boolean }) {
   return (
     <motion.li
+      id={`job-${job.ticket_id}`}
       layout
       layoutId={job.id}
       initial={{ opacity: 0, y: 8 }}
@@ -33,7 +34,7 @@ export function JobCard({ job }: { job: Job }) {
       exit={{ opacity: 0 }}
       transition={SPRING}
       whileHover={{ y: -2 }}
-      className={`job job-${job.status}`}
+      className={`job job-${job.status}${highlighted ? " job-highlighted" : ""}`}
     >
       <div className="job-head">
         <span className="job-ticket">{job.ticket_id}</span>

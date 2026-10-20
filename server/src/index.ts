@@ -6,7 +6,7 @@ import { env } from "./env.ts";
 import { prefetchPriorities } from "./cache.ts";
 import { setRunnerSocket } from "./runner-link.ts";
 import { addDashboardClient, getStatus, getOrderHistory } from "./dashboard-link.ts";
-import { toolGetPriorities, toolOrder, toolGetStatus, toolAnswerQuestion, toolImplement } from "./tools.ts";
+import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement } from "./tools.ts";
 import { registerDeskRoutes } from "./desk.ts";
 import { registerAuthRoutes, requireAuth } from "./auth.ts";
 import { onCallStarted, isCallerAllowed } from "./call-guard.ts";
@@ -81,15 +81,10 @@ app.post("/tools/get_priorities", async () => {
   return { message: await timed("get_priorities", toolGetPriorities) };
 });
 
-app.post("/tools/order", async (req) => {
+app.post("/tools/handle_task", async (req) => {
   if (!isCallerAllowed()) return { message: PRIVATE_NUMBER_MESSAGE };
-  const { tickets } = req.body as { tickets?: string };
-  return { message: await timed("order", () => toolOrder(tickets ?? "")) };
-});
-
-app.post("/tools/get_status", async () => {
-  if (!isCallerAllowed()) return { message: PRIVATE_NUMBER_MESSAGE };
-  return { message: await timed("get_status", toolGetStatus) };
+  const { request } = req.body as { request?: string };
+  return { message: await timed("handle_task", () => toolHandleTask(request ?? "")) };
 });
 
 app.post("/tools/answer_question", async (req) => {

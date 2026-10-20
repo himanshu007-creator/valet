@@ -1,7 +1,10 @@
-import { getPrioritiesSummary, getIssueById } from "./cache.ts";
+import { getPrioritiesSummary, getIssueById, getCachedIssues, invalidateIssueCache } from "./cache.ts";
 import { sql } from "./db.ts";
 import { runnerConnected, dispatchJob, dispatchAnswer, dispatchImplement } from "./runner-link.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
+import { createIssue, archiveIssue } from "./linear.ts";
+import { classifyIntent, matchTicket, BAND } from "./router.ts";
+import { env } from "./env.ts";
 
 // shared by the Bolna phone tools (HTTP) and desk mode's local tool-calling loop —
 // one implementation, two callers, so neither drifts from the other.
@@ -35,26 +38,81 @@ export async function toolOrder(ticketsArg: string): Promise<string> {
   return `Starting on ${found.length} thing${found.length > 1 ? "s" : ""}. I'll call you when they're done.`;
 }
 
-export async function toolGetStatus(): Promise<string> {
-  const [order] = await sql`select id from orders order by created_at desc limit 1`;
-  if (!order) return "Nothing running right now.";
-  const jobs = await sql`select status, title from jobs where order_id = ${order.id}`;
+const STATUS_WORDS: Record<string, string> = {
+  queued: "queued",
+  running: "in progress",
+  done: "done",
+  blocked: "waiting on a decision from you",
+  failed: "hit an error",
+  timeout: "timed out",
+};
+
+async function checkPrStatus(prUrl: string): Promise<string | null> {
+  if (!env.githubToken) return null;
+  const m = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (!m) return null;
+  const [, owner, repo, number] = m;
+  const headers = { Authorization: `Bearer ${env.githubToken}`, Accept: "application/vnd.github+json" };
+  try {
+    const prRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, { headers });
+    if (!prRes.ok) return null;
+    const pr = await prRes.json();
+    const checksRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${pr.head.sha}/check-runs`, { headers });
+    if (!checksRes.ok) return null;
+    const { check_runs } = await checksRes.json();
+    if (!check_runs?.length) return null;
+    const failed = check_runs.filter((c: any) => c.conclusion === "failure").length;
+    const pending = check_runs.filter((c: any) => c.status !== "completed").length;
+    if (failed > 0) return `${failed} check${failed > 1 ? "s" : ""} failing`;
+    if (pending > 0) return "checks still running";
+    return "all checks passing";
+  } catch {
+    return null;
+  }
+}
+
+export async function toolProbeTask(ticketId: string): Promise<string> {
+  const [job] = await sql`
+    select status, question, pr_url, title from jobs where ticket_id = ${ticketId}
+    order by finished_at desc nulls first, started_at desc nulls last limit 1
+  `;
+  if (!job) return `I don't have anything on ${ticketId} yet.`;
+  const parts = [`${job.title} is ${STATUS_WORDS[job.status] ?? job.status}.`];
+  if (job.status === "blocked" && job.question) parts.push(`Waiting on: ${job.question}`);
+  if (job.pr_url) {
+    const ci = await checkPrStatus(job.pr_url);
+    if (ci) parts.push(`CI: ${ci}.`);
+  }
+  return parts.join(" ");
+}
+
+export async function toolGetStatusAll(): Promise<string> {
+  const jobs = await sql`select status from jobs where status in ('queued', 'running', 'blocked')`;
+  if (jobs.length === 0) return "Nothing running right now.";
   const running = jobs.filter((j) => j.status === "queued" || j.status === "running").length;
-  const done = jobs.filter((j) => j.status === "done").length;
   const blocked = jobs.filter((j) => j.status === "blocked").length;
-  const errored = jobs.filter((j) => j.status === "failed" || j.status === "timeout").length;
   const parts: string[] = [];
-  if (running > 0) parts.push(`${running} still running`);
-  if (done > 0) parts.push(`${done} done`);
+  if (running > 0) parts.push(`${running} running`);
   if (blocked > 0) parts.push(`${blocked} waiting on a decision from you`);
-  if (errored > 0) parts.push(`${errored} hit an error`);
-  return parts.length > 0 ? parts.join(", ") + "." : "Nothing running right now.";
+  return parts.join(", ") + ".";
 }
 
 export async function toolAnswerQuestion(answer: string): Promise<string> {
   if (!answer) return "I didn't catch an answer.";
-  const [job] = await sql`select id from jobs where status = 'blocked' order by finished_at desc limit 1`;
-  if (!job) return "There's nothing waiting on an answer right now.";
+  const blocked = await sql`select id, ticket_id, title, question from jobs where status = 'blocked' order by finished_at desc`;
+  if (blocked.length === 0) return "There's nothing waiting on an answer right now.";
+
+  let job = blocked[0];
+  if (blocked.length > 1) {
+    const candidates = blocked.map((b) => ({ id: b.ticket_id, title: b.question ?? b.title }));
+    const { id, confidence } = await matchTicket(answer, candidates);
+    if (!id || confidence < BAND.LOW) {
+      const names = blocked.map((b) => `${b.ticket_id} — ${b.title}`).join(", or ");
+      return `I have more than one open question — which ticket is this for: ${names}?`;
+    }
+    job = blocked.find((b) => b.ticket_id === id)!;
+  }
+
   await sql`update jobs set answer = ${answer} where id = ${job.id}`;
   await dispatchAnswer(job.id, answer);
   broadcastStatus();
@@ -73,4 +131,79 @@ export async function toolImplement(ticketArg: string): Promise<string> {
   dispatchImplement(job.id, { id: ticketId, title: job.title, description: "" });
   broadcastStatus();
   return `Starting the real implementation for ${job.title}. I'll call you when it's ready.`;
+}
+
+// one in-memory slot — single-user, one call at a time, no DB table needed. Delete is
+// hard-gated behind an explicit second confirmation regardless of Jev's confidence: a
+// destructive, voice-triggered action shouldn't go through on a single spoken "yes."
+let pendingDelete: { ticketId: string; issueId: string; title: string; expiresAt: number } | null = null;
+const AFFIRM_RE = /\b(yes|yeah|yep|yup|confirm(ed)?|do it|go ahead|sure|please do)\b/i;
+const NEGATE_RE = /\b(no|don'?t|do not|nevermind|never mind|stop|cancel that)\b/i;
+
+export async function toolHandleTask(request: string): Promise<string> {
+  const text = (request ?? "").trim();
+  if (!text) return "I didn't catch what you'd like me to do.";
+
+  if (pendingDelete && pendingDelete.expiresAt > Date.now()) {
+    if (NEGATE_RE.test(text)) {
+      const title = pendingDelete.title;
+      pendingDelete = null;
+      return `Okay, leaving "${title}" as is.`;
+    }
+    if (AFFIRM_RE.test(text)) {
+      const { issueId, title } = pendingDelete;
+      pendingDelete = null;
+      await archiveIssue(issueId);
+      return `Done — "${title}" is archived. You can restore it from Linear's trash if you change your mind.`;
+    }
+  }
+  pendingDelete = null; // any other utterance drops a stale pending delete rather than guessing
+
+  const issues = await getCachedIssues();
+  const candidates = issues.map((i) => ({ id: i.identifier, title: i.title }));
+  const { intent } = await classifyIntent(text);
+
+  switch (intent) {
+    case "overview":
+      return toolGetStatusAll();
+
+    case "create": {
+      const { id, confidence } = await matchTicket(text, candidates);
+      if (id && confidence >= BAND.LOW) {
+        const existing = candidates.find((c) => c.id === id);
+        return `That sounds like it might already be ${id} — "${existing?.title}". Want me to start that instead?`;
+      }
+      const title = text.length > 80 ? text.slice(0, 80) : text;
+      const issue = await createIssue(title, text);
+      invalidateIssueCache();
+      return `Created ${issue.identifier} — "${issue.title}".`;
+    }
+
+    case "probe": {
+      const { id } = await matchTicket(text, candidates);
+      if (!id) return "I couldn't find a matching ticket to check on.";
+      return toolProbeTask(id);
+    }
+
+    case "delete": {
+      const { id } = await matchTicket(text, candidates);
+      if (!id) return "I couldn't find a matching ticket to cancel.";
+      const issue = await getIssueById(id);
+      if (!issue) return "I couldn't find a matching ticket to cancel.";
+      pendingDelete = { ticketId: id, issueId: issue.id, title: issue.title, expiresAt: Date.now() + 2 * 60 * 1000 };
+      return `Just to confirm — cancel ${id}, "${issue.title}"? Say yes to archive it.`;
+    }
+
+    case "execute":
+    default: {
+      const { id, confidence } = await matchTicket(text, candidates);
+      if (id && confidence >= BAND.LOW) return toolOrder(id);
+      // journey 3, "unsure": no confident existing match — create then execute.
+      if (!runnerConnected()) return "The runner on your Mac isn't connected right now, so I can't start that.";
+      const title = text.length > 80 ? text.slice(0, 80) : text;
+      const issue = await createIssue(title, text);
+      invalidateIssueCache();
+      return toolOrder(issue.identifier);
+    }
+  }
 }

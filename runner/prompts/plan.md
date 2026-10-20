@@ -5,11 +5,18 @@ Ticket {{TICKET_ID}}: {{TICKET_TITLE}}
 
 {{TICKET_DESCRIPTION}}
 
-Research whatever is relevant (ask about existing repos, prior art, constraints) and write
-`{{PLAN_FILE}}.md` in the current directory with these sections:
+Research whatever is relevant (existing repos, prior art, constraints) and write
+`{{PLAN_FILE}}.md` in the current directory with these sections, each short and concrete —
+no filler, no restating the ticket:
 
-## Summary
-## Approach
+## PRD
+What this is and why it matters. One paragraph.
+## HLD
+The shape of the solution, bullet-level — components, how they connect, what changes.
+## LLD
+Concrete enough to build from: files, functions, schema, APIs, as applicable.
+## ITD
+How to integrate, test, and verify this actually works end to end.
 ## Open questions
 
 At most one open question — either a genuine content ambiguity, or something you'd want explicit

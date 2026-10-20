@@ -30,3 +30,14 @@ export async function getIssueById(ticketId: string): Promise<Issue | undefined>
   if (!cached || Date.now() - cached.at >= TTL_MS) await getPrioritiesSummary();
   return cached!.issues.find((i) => i.identifier.toLowerCase() === ticketId.toLowerCase());
 }
+
+export async function getCachedIssues(): Promise<Issue[]> {
+  if (!cached || Date.now() - cached.at >= TTL_MS) await getPrioritiesSummary();
+  return cached!.issues;
+}
+
+// a just-created issue won't be in the cache until the TTL expires — invalidate immediately
+// so a follow-up probe/delete/execute in the same call can still find it.
+export function invalidateIssueCache() {
+  cached = null;
+}
