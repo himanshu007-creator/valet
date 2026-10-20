@@ -19,6 +19,7 @@ export const env = {
   cartesiaApiKey: process.env.CARTESIA_API_KEY ?? "",
   runnerToken: required("RUNNER_TOKEN"),
   allowedCallerNumber: process.env.ALLOWED_CALLER_NUMBER ?? "",
+  twilioNumber: process.env.TWILIO_NUMBER ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? "",
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? "",

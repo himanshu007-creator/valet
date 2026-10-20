@@ -10,11 +10,14 @@ import { env } from "./env.ts";
 // one implementation, two callers, so neither drifts from the other.
 
 // a reconnect in flight (the runner's heartbeat self-heals a dead connection within a couple
-// pings) shouldn't read as "not connected" to the caller — one short retry covers that window
-// without a caller ever noticing, instead of a flat false telling them to try again themselves.
+// pings) shouldn't read as "not connected" to the caller — a couple short retries cover that
+// window without a caller ever noticing, instead of a flat false telling them to try again
+// themselves. Reproduced live: a single 800ms retry wasn't always enough.
 async function runnerConnectedWithRetry(): Promise<boolean> {
-  if (runnerConnected()) return true;
-  await new Promise((r) => setTimeout(r, 800));
+  for (let i = 0; i < 3; i++) {
+    if (runnerConnected()) return true;
+    await new Promise((r) => setTimeout(r, 700));
+  }
   return runnerConnected();
 }
 
@@ -100,7 +103,9 @@ export async function toolProbeTask(ticketId: string): Promise<string> {
 // caller re-asking that gets routed here by Jev's "overview" criteria and needs a real answer,
 // not just task counts.
 export async function toolGetStatusAll(): Promise<string> {
-  const online = runnerConnected();
+  // same transient-reconnect tolerance as the action-gating checks — this IS the answer to
+  // "is my mac connected," so it needs to be at least as resilient as those, not less.
+  const online = await runnerConnectedWithRetry();
   const jobs = await sql`select status from jobs where status in ('queued', 'running', 'blocked')`;
   const parts: string[] = [online ? "The runner on your Mac is connected." : "The runner on your Mac isn't connected right now."];
   if (jobs.length === 0) {

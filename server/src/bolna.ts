@@ -153,9 +153,14 @@ export async function updateAgent() {
 }
 
 export async function triggerCallback(toNumber: string, summary: string, question?: string) {
+  // without from_phone_number, Bolna falls back to some platform-default caller ID — confirmed
+  // live that it picked a US number the caller had never seen before, which got auto-flagged
+  // as spam and silently blocked before ever ringing. Force it to use VALET's own registered
+  // number, the one the caller already knows and has called in on.
   return bolnaFetch("/call", {
     agent_id: process.env.BOLNA_AGENT_ID,
     recipient_phone_number: toNumber,
+    from_phone_number: env.twilioNumber || undefined,
     user_data: { summary, question: question ?? "" },
   });
 }
