@@ -169,7 +169,10 @@ async function reconcile(ws: WebSocket) {
 
 async function isOpencodeStillRunning(jobDir: string): Promise<boolean> {
   try {
-    const { stdout } = await exec("pgrep", ["-f", jobDir]);
+    // plain `pgrep -f jobDir` false-positives on anything whose command line merely
+    // mentions the path (e.g. a shell watching session.log for a sentinel) — require
+    // "opencode run" too, since jobDir appears in XDG_DATA_HOME before "opencode run".
+    const { stdout } = await exec("pgrep", ["-f", `${jobDir}.*opencode run`]);
     return stdout.trim().length > 0;
   } catch {
     return false; // pgrep exits non-zero when nothing matches
@@ -196,5 +199,12 @@ async function watchUntilDone(state: JobState): Promise<JobResult> {
   }
   return { status: "timeout" };
 }
+
+// Render's free tier spins down after ~15 min idle. Vercel Cron can't ping sub-daily on the
+// Hobby plan, but the runner is already an always-on daemon — simplest fix, no new accounts.
+const healthzUrl = SERVER_WS_URL.replace(/^wss?:\/\//, (m) => (m === "wss://" ? "https://" : "http://")).replace(/\/ws\/runner.*$/, "/healthz");
+setInterval(() => {
+  fetch(healthzUrl).catch((err) => console.error("keep-alive ping failed", err.message));
+}, 10 * 60 * 1000);
 
 connect();

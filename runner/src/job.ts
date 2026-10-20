@@ -181,7 +181,12 @@ export async function runJob(resolved: ResolvedRepo, ticket: Ticket, jobId: stri
 
   const branch = `valet/${id}`;
   const worktreeDir = path.join(resolved.repoPath, "..", `${path.basename(resolved.repoPath)}-${id}`);
-  await exec("git", ["worktree", "add", worktreeDir, "-b", branch, "origin/main"], { cwd: resolved.repoPath });
+  // -B (not -b): a stale branch/worktree from an earlier crashed or orphaned attempt on the
+  // same ticket must not block a fresh order — reset to a clean branch off origin/main instead.
+  if (existsSync(worktreeDir)) {
+    await exec("git", ["worktree", "remove", worktreeDir, "--force"], { cwd: resolved.repoPath }).catch(() => {});
+  }
+  await exec("git", ["worktree", "add", worktreeDir, "-B", branch, "origin/main"], { cwd: resolved.repoPath });
   await copyEnvFiles(resolved.repoPath, worktreeDir);
 
   const prompt = render(IMPL_PROMPT, ticket);
