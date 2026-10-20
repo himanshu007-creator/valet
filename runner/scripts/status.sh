@@ -13,7 +13,10 @@ if [ ! -f "$PLIST" ]; then
   exit 1
 fi
 
-STATE=$(launchctl print "gui/$UID_NUM/com.valet.runner" 2>/dev/null | awk -F'= ' '/^\tstate = /{print $2}')
+# launchctl print exits non-zero when the service isn't registered at all — under `set -e`
+# with a pipe, that silently killed this whole script with no output (reproduced live). "|| true"
+# so a genuinely-not-loaded daemon falls through to the NOT RUNNING branch below instead.
+STATE=$(launchctl print "gui/$UID_NUM/com.valet.runner" 2>/dev/null | awk -F'= ' '/^\tstate = /{print $2}' || true)
 if [ "$STATE" = "running" ]; then
   echo "daemon: running"
 else

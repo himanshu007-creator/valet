@@ -13,6 +13,15 @@ if [ ! -f "$PLIST" ]; then
 fi
 
 launchctl bootout "gui/$UID_NUM/com.valet.runner" 2>/dev/null || true
-launchctl bootstrap "gui/$UID_NUM" "$PLIST"
+sleep 1  # launchd needs a moment to fully release the service label after bootout, or the
+         # immediately-following bootstrap can fail with a spurious "Input/output error"
+         # (reproduced live: this bit us even after switching off the deprecated load/unload).
+
+# retry once — same race can still occasionally need a second attempt
+if ! launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/tmp/valet-bootstrap-err; then
+  echo "bootstrap failed, retrying once: $(cat /tmp/valet-bootstrap-err)" >&2
+  sleep 2
+  launchctl bootstrap "gui/$UID_NUM" "$PLIST"
+fi
 sleep 2
 exec "$(dirname "${BASH_SOURCE[0]}")/status.sh"
