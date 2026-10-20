@@ -1,5 +1,6 @@
 import type { WebSocket } from "ws";
 import { sql } from "./db.ts";
+import { runnerConnected } from "./runner-link.ts";
 
 const clients = new Set<WebSocket>();
 
@@ -11,12 +12,13 @@ export function addDashboardClient(ws: WebSocket) {
 
 export async function getStatus() {
   const [order] = await sql`select id, tickets, created_at from orders order by created_at desc limit 1`;
-  if (!order) return { type: "status", order: null };
+  const runnerOnline = runnerConnected();
+  if (!order) return { type: "status", order: null, runnerOnline };
   const jobs = await sql`
     select id, ticket_id, title, status, pr_url, question, answer
     from jobs where order_id = ${order.id} order by ticket_id
   `;
-  return { type: "status", order: { id: order.id, createdAt: order.created_at, jobs } };
+  return { type: "status", order: { id: order.id, createdAt: order.created_at, jobs }, runnerOnline };
 }
 
 export async function getOrderHistory() {

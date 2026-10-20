@@ -13,7 +13,7 @@ import { Landing } from "./Landing.tsx";
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
 
-type Status = { order: { id: string; createdAt: string; jobs: Job[] } | null };
+type Status = { order: { id: string; createdAt: string; jobs: Job[] } | null; runnerOnline?: boolean };
 type Tab = "today" | "history" | "stats";
 
 function useDashboardSocket(onStatus: (s: Status) => void) {
@@ -25,7 +25,7 @@ function useDashboardSocket(onStatus: (s: Status) => void) {
       ws = new WebSocket(`${WS_URL}/ws/dashboard`);
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
-        if (msg.type === "status") onStatus({ order: msg.order });
+        if (msg.type === "status") onStatus({ order: msg.order, runnerOnline: msg.runnerOnline });
       };
       ws.onclose = () => {
         retryTimer = setTimeout(connect, 2000);
@@ -79,6 +79,15 @@ function Dashboard({ username, onLogout }: { username: string; onLogout: () => v
       <div className="page-head">
         <h1>VALET</h1>
         <div className="who">
+          {status.runnerOnline !== undefined && (
+            <span
+              className={`runner-dot ${status.runnerOnline ? "runner-online" : "runner-offline"}`}
+              title={status.runnerOnline ? "Runner on your Mac is connected" : "Runner on your Mac is not connected"}
+            >
+              ● {status.runnerOnline ? "Mac connected" : "Mac disconnected"}
+            </span>
+          )}
+          {" · "}
           {username} · <PushToggle /> · <button className="link-button" onClick={onLogout}>sign out</button>
         </div>
       </div>

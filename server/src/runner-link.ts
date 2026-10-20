@@ -18,12 +18,16 @@ const PING_MS = 20_000;
 
 export function setRunnerSocket(ws: WebSocket) {
   runnerSocket = ws;
+  broadcastStatus(); // dashboard's "runner connected" indicator updates live, not just on job events
   const pinger = setInterval(() => {
     if (ws.readyState === ws.OPEN) ws.ping();
   }, PING_MS);
   ws.on("close", () => {
     clearInterval(pinger);
-    if (runnerSocket === ws) runnerSocket = null;
+    if (runnerSocket === ws) {
+      runnerSocket = null;
+      broadcastStatus();
+    }
   });
   ws.on("message", (raw) => handleRunnerMessage(String(raw)));
 }

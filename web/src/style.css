@@ -122,6 +122,14 @@ section { margin-bottom: 32px; }
   color: var(--muted);
 }
 
+.runner-dot {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.runner-online { color: var(--accent); }
+.runner-offline { color: #f87171; }
+
 .link-button {
   background: none;
   border: none;

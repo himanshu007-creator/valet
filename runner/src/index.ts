@@ -32,14 +32,37 @@ function sendResult(ws: WebSocket, jobId: string, result: JobResult, errorMessag
   }
 }
 
+// A clean server-side close always fires 'close' here and reconnects fine — but a server
+// restart (deploy, crash) can kill the underlying TCP connection without a proper WS close
+// handshake reaching this process, leaving `ws` in a state that LOOKS open forever even
+// though nothing is listening on the other end (reproduced live: the runner sat "connected"
+// silently for 14+ minutes through two server restarts). Track liveness via pong responses
+// to our own ping and force-terminate (which does fire 'close') if two heartbeats in a row
+// go unanswered — the standard `ws` library heartbeat pattern.
+const HEARTBEAT_MS = 20_000;
+
 function connect() {
   const ws = new WebSocket(`${SERVER_WS_URL}?token=${RUNNER_TOKEN}`);
+  let isAlive = true;
 
   ws.on("open", () => {
     console.log("connected to server");
+    isAlive = true;
     reconcile(ws).catch((err) => console.error("reconcile failed", err));
   });
+  ws.on("pong", () => {
+    isAlive = true;
+  });
+  const heartbeat = setInterval(() => {
+    if (!isAlive) {
+      console.log("no pong since last heartbeat, forcing reconnect");
+      return ws.terminate();
+    }
+    isAlive = false;
+    ws.ping();
+  }, HEARTBEAT_MS);
   ws.on("close", () => {
+    clearInterval(heartbeat);
     console.log("disconnected, retrying in 3s");
     setTimeout(connect, 3000);
   });
