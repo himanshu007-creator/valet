@@ -7,10 +7,10 @@
     "run-one": "tsx scripts/run-one.ts"
   },
   "dependencies": {
+    "tsx": "^4.19.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13"
