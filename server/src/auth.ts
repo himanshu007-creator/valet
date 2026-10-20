@@ -27,11 +27,20 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
   return derived.length === stored_.length && timingSafeEqual(derived, stored_);
 }
 
+const isProd = process.env.NODE_ENV === "production";
+
 function setSessionCookie(reply: FastifyReply, token: string) {
   reply.setCookie(COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    // the deployed web app (Vercel) and API (Render) are different registrable domains —
+    // genuinely cross-site, not just cross-port like local dev. SameSite=Lax cookies are
+    // never sent on cross-site fetch/XHR (only top-level navigation), so every API call right
+    // after login 401'd despite the cookie having been set — reproduced live. None is required
+    // for a cross-site fetch to carry the cookie, and browsers mandate Secure alongside it.
+    // Local dev stays "lax": localhost:5173 -> localhost:8080 is cross-port but same-site by
+    // the SameSite spec, and forcing Secure would break plain-http local dev entirely.
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd,
     path: "/",
     maxAge: SESSION_MS / 1000,
   });
