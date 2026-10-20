@@ -20,12 +20,24 @@ async function bolnaFetch(path: string, body: unknown, method: "POST" | "PUT" = 
 // ponytail: tools_config.api_tools shape for attaching custom functions via the create-agent
 // API is inferred from the OpenAPI schema reference, not a worked example in the docs — if
 // agent creation 400s on this field, check the dashboard's "Generate from cURL" output instead.
-function tool(name: string, description: string, properties: Record<string, { type: string; description: string }>, required: string[]) {
+// Bolna plays `pre_call_message` as a filler the instant a tool call is dispatched, guaranteed
+// (not dependent on the LLM remembering to say something) — better than a prompt instruction
+// for killing dead air during handle_task's ~1s Jev round trip. On-brand text per tool,
+// otherwise Bolna falls back to a generic "just give me a moment" that doesn't match VALET's
+// voice. Not used for get_priorities, which is cache-warm and near-instant most of the time.
+function tool(
+  name: string,
+  description: string,
+  properties: Record<string, { type: string; description: string }>,
+  required: string[],
+  preCallMessage?: string,
+) {
   return {
     name,
     description,
     parameters: { type: "object", properties, required },
     key: "custom_task",
+    pre_call_message: preCallMessage,
     value: {
       method: "POST",
       url: `${env.publicUrl}/tools/${name}`,
@@ -42,18 +54,21 @@ const tools = [
     "Handle any task-management request: starting work on a ticket, creating a new one, checking on one, cancelling one, or an overview of what's in progress. Pass the caller's request through close to verbatim.",
     { request: { type: "string", description: "what the caller asked for, in their own words" } },
     ["request"],
+    "On it.",
   ),
   tool(
     "answer_question",
     "Submit the user's answer to the open question from the last callback",
     { answer: { type: "string", description: "the user's spoken answer" } },
     ["answer"],
+    "Got it, one moment.",
   ),
   tool(
     "implement",
     "Actually implement the real code for a ticket that already has a finished research pass — turns the draft PR into a real one",
     { ticket_id: { type: "string", description: "the ticket id, e.g. HIM-9" } },
     ["ticket_id"],
+    "Starting that now.",
   ),
 ];
 
@@ -109,7 +124,7 @@ function agentBody() {
           "You are VALET — an engineering concierge for the developer's coding agents. Warm but brief, like a good host: unhurried, never groveling, never curt. " +
           "Speak short spoken sentences, numbers as words, no markdown, never read ticket IDs aloud unless asked. " +
           "On the first turn, call handle_task with 'overview of everything in progress' and lead with anything blocked before waiting to be asked what's going on. " +
-          "For any other task request — start, create, check on, or cancel something — say a brief acknowledgment first ('On it,' 'One moment,' 'Let me check') so there's no silence while it works, then call handle_task with the caller's own words, close to verbatim. " +
+          "For any other task request — start, create, check on, or cancel something — call handle_task with the caller's own words, close to verbatim. " +
           "If a tool's reply asks you to confirm something (for example, cancelling a ticket), say it back plainly and wait for a clear yes before calling that tool again — don't assume consent. " +
           "If a user_data question is present, it has numbered options plus room for a custom answer — read every option aloud clearly, pausing between them. " +
           "If the caller picks a number, restate which option that was in your own words before calling answer_question, and pass the full option text as the answer, not just the number. If they give a custom answer, pass their words directly. " +

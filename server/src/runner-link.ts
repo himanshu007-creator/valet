@@ -9,9 +9,20 @@ import { notifyPush } from "./push.ts";
 
 let runnerSocket: WebSocket | null = null;
 
+// Render's proxy (and most reverse proxies) idle-time out a WebSocket with no data flowing —
+// during a real phone call there can be long gaps with nothing to say to the runner, so without
+// this the connection silently drops and reconnects every ~30-60s. A tool call landing in that
+// reconnect gap sees "runner not connected" even though the Mac is right there. A ping every 20s
+// keeps data flowing in both directions; the `ws` client auto-responds to pings with pongs.
+const PING_MS = 20_000;
+
 export function setRunnerSocket(ws: WebSocket) {
   runnerSocket = ws;
+  const pinger = setInterval(() => {
+    if (ws.readyState === ws.OPEN) ws.ping();
+  }, PING_MS);
   ws.on("close", () => {
+    clearInterval(pinger);
     if (runnerSocket === ws) runnerSocket = null;
   });
   ws.on("message", (raw) => handleRunnerMessage(String(raw)));
