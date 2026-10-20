@@ -9,14 +9,17 @@ import { env } from "./env.ts";
 // shared by the Bolna phone tools (HTTP) and desk mode's local tool-calling loop —
 // one implementation, two callers, so neither drifts from the other.
 
-// a reconnect in flight (the runner's heartbeat self-heals a dead connection within a couple
-// pings) shouldn't read as "not connected" to the caller — a couple short retries cover that
-// window without a caller ever noticing, instead of a flat false telling them to try again
-// themselves. Reproduced live: a single 800ms retry wasn't always enough.
+// a reconnect in flight (the runner retries every 3s, and its own heartbeat forces a
+// reconnect within a couple missed pings) shouldn't read as "not connected" to the caller —
+// retries cover that window without a caller ever noticing, instead of a flat false telling
+// them to try again themselves. Reproduced live, twice: first a single 800ms retry wasn't
+// enough, then a ~2.1s budget (3 retries) still wasn't enough for a real gap mid-call. Budget
+// is now ~6s — comfortably past the runner's own 3s reconnect-retry interval, and the voice
+// caller already has Bolna's pre_call_message playing during this wait, so it isn't dead air.
 async function runnerConnectedWithRetry(): Promise<boolean> {
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 8; i++) {
     if (runnerConnected()) return true;
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((r) => setTimeout(r, 750));
   }
   return runnerConnected();
 }

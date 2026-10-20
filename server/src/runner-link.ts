@@ -12,20 +12,27 @@ let runnerSocket: WebSocket | null = null;
 // Render's proxy (and most reverse proxies) idle-time out a WebSocket with no data flowing —
 // during a real phone call there can be long gaps with nothing to say to the runner, so without
 // this the connection silently drops and reconnects every ~30-60s. A tool call landing in that
-// reconnect gap sees "runner not connected" even though the Mac is right there. A ping every 20s
-// keeps data flowing in both directions; the `ws` client auto-responds to pings with pongs.
-const PING_MS = 20_000;
+// reconnect gap sees "runner not connected" even though the Mac is right there. A ping keeps
+// data flowing in both directions; the `ws` client auto-responds to pings with pongs. Tightened
+// from 20s to 15s after a real mid-call drop outlasted the caller-side retry budget.
+const PING_MS = 15_000;
 
 export function setRunnerSocket(ws: WebSocket) {
   runnerSocket = ws;
+  const connectedAt = Date.now();
+  console.log("runner socket set");
   broadcastStatus(); // dashboard's "runner connected" indicator updates live, not just on job events
   const pinger = setInterval(() => {
     if (ws.readyState === ws.OPEN) ws.ping();
   }, PING_MS);
-  ws.on("close", () => {
+  ws.on("close", (code, reason) => {
     clearInterval(pinger);
     if (runnerSocket === ws) {
       runnerSocket = null;
+      // previously silent — reproduced a real "not connected mid-call" case with nothing in the
+      // logs to show how long the gap actually was. Now there's a timestamped record on both
+      // sides of every connect/disconnect pair.
+      console.log(`runner socket closed after ${Math.round((Date.now() - connectedAt) / 1000)}s, code ${code} ${reason?.toString() ?? ""}`);
       broadcastStatus();
     }
   });
