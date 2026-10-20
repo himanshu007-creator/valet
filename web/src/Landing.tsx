@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "motion/react";
+import { motion, useScroll, useTransform } from "motion/react";
 import { useLenis } from "./useLenis.ts";
 
 const JOURNEYS = [
@@ -18,8 +19,22 @@ const FADE_UP = {
   transition: { duration: 0.5, ease: "easeOut" as const },
 };
 
+const GRID = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.08 } },
+};
+
+const CARD = {
+  hidden: { opacity: 0, y: 18 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" as const } },
+};
+
 export function Landing({ authed }: { authed: boolean }) {
   useLenis();
+  const heroRef = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  const heroY = useTransform(scrollYProgress, [0, 1], ["0%", "18%"]);
+  const heroScale = useTransform(scrollYProgress, [0, 1], [1, 1.08]);
 
   return (
     <div className="landing">
@@ -30,8 +45,16 @@ export function Landing({ authed }: { authed: boolean }) {
         </Link>
       </header>
 
-      <section className="landing-hero">
-        <img className="landing-hero-bg" src="/landing/hero-1.webp" alt="" loading="eager" fetchPriority="high" />
+      <section className="landing-hero" ref={heroRef}>
+        <motion.img
+          className="landing-hero-bg"
+          src="/landing/hero-1.webp"
+          alt=""
+          loading="eager"
+          fetchPriority="high"
+          style={{ y: heroY, scale: heroScale }}
+        />
+        <div className="landing-glow" aria-hidden />
         <motion.div className="landing-hero-content" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: "easeOut" }}>
           <h1 className="landing-title">VALET</h1>
           <p className="landing-tagline">Say it. It's handled.</p>
@@ -48,34 +71,34 @@ export function Landing({ authed }: { authed: boolean }) {
       <section className="landing-section">
         <motion.div {...FADE_UP}>
           <h2 className="landing-h2">How it works</h2>
-          <div className="landing-steps">
-            <div className="landing-step">
+          <motion.div className="landing-steps" variants={GRID} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-80px" }}>
+            <motion.div className="landing-step" variants={CARD}>
               <span className="landing-step-num">01</span>
               <p>Speak. On the phone, or in the browser.</p>
-            </div>
-            <div className="landing-step">
+            </motion.div>
+            <motion.div className="landing-step" variants={CARD}>
               <span className="landing-step-num">02</span>
               <p>VALET works — research, a draft, real code — in the background, on your own machine.</p>
-            </div>
-            <div className="landing-step">
+            </motion.div>
+            <motion.div className="landing-step" variants={CARD}>
               <span className="landing-step-num">03</span>
               <p>You're called back only when there's a real decision, or it's genuinely done.</p>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
         </motion.div>
       </section>
 
       <section className="landing-section landing-section-alt">
         <motion.div {...FADE_UP}>
           <h2 className="landing-h2">Ask for anything</h2>
-          <div className="landing-journeys">
+          <motion.div className="landing-journeys" variants={GRID} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-80px" }}>
             {JOURNEYS.map((j) => (
-              <div key={j.verb} className="landing-journey">
+              <motion.div key={j.verb} className="landing-journey" variants={CARD} whileHover={{ y: -3 }}>
                 <div className="landing-journey-verb">{j.verb}</div>
                 <div className="landing-journey-example">{j.example}</div>
-              </div>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </motion.div>
       </section>
 

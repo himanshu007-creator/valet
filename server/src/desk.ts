@@ -117,7 +117,7 @@ export function registerDeskRoutes(app: FastifyInstance) {
       body: JSON.stringify({
         model_id: "sonic-2",
         transcript: input,
-        voice: { mode: "id", id: "3d5ce2fb-e56c-42f0-9ed9-4662484063b4", experimental_controls: { speed: "slow" } },
+        voice: { mode: "id", id: "3e1ed423-17e5-4773-b87c-25b031106e41", experimental_controls: { speed: "normal" } },
         output_format: { container: format, encoding: "pcm_s16le", sample_rate: 24000 },
       }),
     });
