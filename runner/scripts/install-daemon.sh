@@ -15,10 +15,14 @@ fi
 
 sed -e "s#__NODE_BIN__#$NODE_BIN#g" -e "s#__RUNNER_DIR__#$RUNNER_DIR#g" -e "s#__USER_PATH__#$PATH#g" "$PLIST_SRC" > "$PLIST_DEST"
 
-launchctl unload "$PLIST_DEST" 2>/dev/null || true
-launchctl load "$PLIST_DEST"
+# bootstrap/bootout, not load/unload — the legacy subcommands print spurious I/O errors and
+# can silently leave the daemon unloaded on modern macOS (confirmed in production use).
+UID_NUM="$(id -u)"
+launchctl bootout "gui/$UID_NUM/com.valet.runner" 2>/dev/null || true
+launchctl bootstrap "gui/$UID_NUM" "$PLIST_DEST"
 
 echo "installed: $PLIST_DEST"
 echo "logs: $RUNNER_DIR/.valet-runner.log"
-echo "check status: launchctl list | grep com.valet.runner"
-echo "uninstall: launchctl unload $PLIST_DEST && rm $PLIST_DEST"
+echo "check status: npm run daemon:status --workspace=runner"
+echo "start/restart: npm run daemon:start --workspace=runner"
+echo "stop: npm run daemon:stop --workspace=runner"

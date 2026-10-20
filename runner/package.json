@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "run-one": "tsx scripts/run-one.ts"
+    "run-one": "tsx scripts/run-one.ts",
+    "daemon:start": "bash scripts/start.sh",
+    "daemon:stop": "bash scripts/stop.sh",
+    "daemon:status": "bash scripts/status.sh"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.7.0",

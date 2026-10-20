@@ -9,6 +9,15 @@ import { env } from "./env.ts";
 // shared by the Bolna phone tools (HTTP) and desk mode's local tool-calling loop —
 // one implementation, two callers, so neither drifts from the other.
 
+// a reconnect in flight (the runner's heartbeat self-heals a dead connection within a couple
+// pings) shouldn't read as "not connected" to the caller — one short retry covers that window
+// without a caller ever noticing, instead of a flat false telling them to try again themselves.
+async function runnerConnectedWithRetry(): Promise<boolean> {
+  if (runnerConnected()) return true;
+  await new Promise((r) => setTimeout(r, 800));
+  return runnerConnected();
+}
+
 export async function toolGetPriorities(): Promise<string> {
   return getPrioritiesSummary();
 }
@@ -19,7 +28,7 @@ export async function toolOrder(ticketsArg: string): Promise<string> {
     .map((t) => t.trim())
     .filter(Boolean);
   if (ids.length === 0) return "I didn't catch which tickets to start on.";
-  if (!runnerConnected()) return "The runner on your Mac isn't connected right now, so I can't start that.";
+  if (!(await runnerConnectedWithRetry())) return "The runner on your Mac isn't connected right now, so I can't start that.";
 
   const issues = await Promise.all(ids.map((id) => getIssueById(id)));
   const found = issues.filter((i) => i !== undefined);
@@ -86,15 +95,25 @@ export async function toolProbeTask(ticketId: string): Promise<string> {
   return parts.join(" ");
 }
 
+// this is the one answer that can genuinely cover "is my Mac connected" — nothing else in the
+// router has a path for a system/connectivity question (it's not about any one ticket), so a
+// caller re-asking that gets routed here by Jev's "overview" criteria and needs a real answer,
+// not just task counts.
 export async function toolGetStatusAll(): Promise<string> {
+  const online = runnerConnected();
   const jobs = await sql`select status from jobs where status in ('queued', 'running', 'blocked')`;
-  if (jobs.length === 0) return "Nothing running right now.";
-  const running = jobs.filter((j) => j.status === "queued" || j.status === "running").length;
-  const blocked = jobs.filter((j) => j.status === "blocked").length;
-  const parts: string[] = [];
-  if (running > 0) parts.push(`${running} running`);
-  if (blocked > 0) parts.push(`${blocked} waiting on a decision from you`);
-  return parts.join(", ") + ".";
+  const parts: string[] = [online ? "The runner on your Mac is connected." : "The runner on your Mac isn't connected right now."];
+  if (jobs.length === 0) {
+    parts.push("Nothing running right now.");
+  } else {
+    const running = jobs.filter((j) => j.status === "queued" || j.status === "running").length;
+    const blocked = jobs.filter((j) => j.status === "blocked").length;
+    const bits: string[] = [];
+    if (running > 0) bits.push(`${running} running`);
+    if (blocked > 0) bits.push(`${blocked} waiting on a decision from you`);
+    parts.push(bits.join(", ") + ".");
+  }
+  return parts.join(" ");
 }
 
 export async function toolAnswerQuestion(answer: string): Promise<string> {
@@ -128,7 +147,7 @@ export async function toolAnswerQuestion(answer: string): Promise<string> {
 export async function toolImplement(ticketArg: string): Promise<string> {
   const ticketId = ticketArg.trim();
   if (!ticketId) return "I didn't catch which ticket.";
-  if (!runnerConnected()) return "The runner on your Mac isn't connected right now, so I can't start that.";
+  if (!(await runnerConnectedWithRetry())) return "The runner on your Mac isn't connected right now, so I can't start that.";
 
   const [job] = await sql`select id, title, pr_url from jobs where ticket_id = ${ticketId} and status = 'done' order by finished_at desc limit 1`;
   if (!job) return "I don't have a finished research pass for that ticket yet — order it first.";
@@ -210,7 +229,7 @@ export async function toolHandleTask(request: string): Promise<string> {
     default: {
       if (id && confidence >= BAND.LOW) return toolOrder(id);
       // journey 3, "unsure": no confident existing match — create then execute.
-      if (!runnerConnected()) return "The runner on your Mac isn't connected right now, so I can't start that.";
+      if (!(await runnerConnectedWithRetry())) return "The runner on your Mac isn't connected right now, so I can't start that.";
       const title = text.length > 80 ? text.slice(0, 80) : text;
       const issue = await createIssue(title, text);
       invalidateIssueCache();

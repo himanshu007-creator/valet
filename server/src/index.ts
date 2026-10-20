@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import cors from "@fastify/cors";
@@ -11,6 +12,7 @@ import { registerDeskRoutes } from "./desk.ts";
 import { registerAuthRoutes, requireAuth } from "./auth.ts";
 import { onCallStarted, isCallerAllowed } from "./call-guard.ts";
 import { timed, getStats } from "./stats.ts";
+import { wsRunnerRateLimit, recordWsRunnerFailure } from "./rate-limit.ts";
 import { sql } from "./db.ts";
 
 const app = Fastify({ logger: true });
@@ -61,13 +63,29 @@ app.post("/api/push/subscribe", { preHandler: requireAuth }, async (req) => {
 });
 
 app.get("/ws/runner", { websocket: true }, (socket, req) => {
+  const ip = req.ip;
+  const limit = wsRunnerRateLimit(ip);
+  if (!limit.allowed) {
+    app.log.warn({ ip }, "runner ws: rate-limited after repeated bad tokens");
+    socket.close(4003, "too many attempts");
+    return;
+  }
+
   const token = new URL(req.url, "http://x").searchParams.get("token");
-  if (token !== env.runnerToken) {
+  // constant-time compare — a plain !== leaks timing information about how many leading
+  // characters matched, which a patient attacker can use to recover the token byte by byte.
+  const tokenBuf = Buffer.from(token ?? "");
+  const expectedBuf = Buffer.from(env.runnerToken);
+  const match = tokenBuf.length === expectedBuf.length && timingSafeEqual(tokenBuf, expectedBuf);
+  if (!match) {
+    recordWsRunnerFailure(ip);
+    app.log.warn({ ip }, "runner ws: rejected bad token");
     socket.close(4001, "bad token");
     return;
   }
+
   setRunnerSocket(socket);
-  app.log.info("runner connected");
+  app.log.info({ ip }, "runner connected");
 });
 
 app.get("/ws/dashboard", { websocket: true, preHandler: requireAuth }, (socket) => {

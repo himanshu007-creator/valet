@@ -17,7 +17,9 @@ const INTENT_CRITERIA = {
   execute: "Begin or continue work on a ticket that should already exist",
   probe: "Check the status or progress of one specific ticket already being worked on",
   delete: "Cancel, remove, or archive a ticket entirely",
-  overview: "A general summary of how many things are in progress, not about one ticket",
+  overview:
+    "A general summary of what's in progress, or asking about the system itself — whether the " +
+    "runner on their Mac is connected, re-checking connection status, or anything not about one named ticket",
 };
 
 // Jev evaluates every named question against the same state in one round trip — asking
