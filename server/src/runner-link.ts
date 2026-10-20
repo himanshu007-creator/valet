@@ -85,6 +85,16 @@ async function handleRunnerMessage(raw: string) {
   }
   if (msg.type !== "status") return;
 
+  const [before] = await sql`select status from jobs where id = ${msg.jobId}`;
+  if (!before) return;
+  // the runner's reconcile() re-reports an orphaned/already-terminal job on every reconnect —
+  // without this guard, every repeat report fired a fresh Linear comment, push, and phone
+  // callback for a job that had already been reported (reproduced live: a caller flapping
+  // between connected/disconnected got called back repeatedly for nothing new). Only a real
+  // status transition should have side effects; a report of the status it's already at is a
+  // no-op past the DB write below.
+  const alreadyReported = before.status === msg.status && TERMINAL.has(msg.status);
+
   const isTerminal = TERMINAL.has(msg.status);
   await sql`
     update jobs set
@@ -98,7 +108,7 @@ async function handleRunnerMessage(raw: string) {
   `;
   broadcastStatus();
 
-  if (!isTerminal) return;
+  if (!isTerminal || alreadyReported) return;
 
   const [job] = await sql`select order_id, ticket_id from jobs where id = ${msg.jobId}`;
   if (!job) return;

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, rename } from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -186,6 +186,12 @@ async function reconcile(ws: WebSocket) {
     } else {
       console.log(`reconcile: ${state.ticketId} orphaned (process gone, no sentinel), reporting failed`);
       ws.send(JSON.stringify({ type: "status", jobId: state.jobId, status: "failed", error: "runner restarted while this job was still in flight" }));
+      // without this, every single future reconnect finds the same dead job dir and re-reports
+      // it — harmless on its own now that the server dedupes repeat terminal reports, but it's
+      // the actual reason that dedupe was needed in the first place, and it's needless work on
+      // every reconnect forever. Rename, don't delete — logs/docs stay for debugging, reconcile
+      // just stops finding a "state.json" to pick up.
+      await rename(statePath, `${statePath}.reported`).catch(() => {});
     }
   }
 }
