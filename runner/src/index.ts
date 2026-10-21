@@ -157,14 +157,19 @@ async function reconcile(ws: WebSocket) {
     const logPath = state.logPath;
     const log = existsSync(logPath) ? await readFile(logPath, "utf8") : "";
 
-    const lastBlocked = log.lastIndexOf("VALET_BLOCKED:");
-    const lastDone = log.lastIndexOf("VALET_DONE");
-    if (lastBlocked !== -1 && lastBlocked > lastDone) {
-      const m = log.slice(lastBlocked).match(/VALET_BLOCKED:\s*(.+)/);
-      if (m) ws.send(JSON.stringify({ type: "status", jobId: state.jobId, status: "blocked", question: m[1].trim() }));
+    // same line-anchored match as pollForSentinel (job.ts) — a bare substring search can match
+    // the prompt's own boilerplate sentence if the agent ever echoes it mid-reasoning.
+    const blockedMatches = [...log.matchAll(/^VALET_BLOCKED:\s*(.+)$/gm)];
+    const doneMatches = [...log.matchAll(/^VALET_DONE\b.*$/gm)];
+    const lastBlockedMatch = blockedMatches.at(-1);
+    const lastDoneMatch = doneMatches.at(-1);
+    const lastBlocked = lastBlockedMatch?.index ?? -1;
+    const lastDone = lastDoneMatch?.index ?? -1;
+    if (lastBlockedMatch && lastBlocked > lastDone) {
+      ws.send(JSON.stringify({ type: "status", jobId: state.jobId, status: "blocked", question: lastBlockedMatch[1].trim() }));
       continue;
     }
-    if (lastDone !== -1 && existsSync(state.docPath)) {
+    if (lastDoneMatch && lastDone !== -1 && existsSync(state.docPath)) {
       // already completed but possibly never reported — reuse the same finish path a fresh
       // run would take (idempotent: finish()/gh pr view-before-create), nothing to resume.
       console.log(`reconcile: ${state.ticketId} already reached VALET_DONE, reporting`);

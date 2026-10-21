@@ -78,8 +78,14 @@ function jobDirFor(resolved: ResolvedRepo, id: string) {
   return path.join(resolved.repoPath, "..", ".valet-jobs", id);
 }
 
-export function jobDirForTicketId(repoHint: string, ticketId: string) {
-  return path.join(repoHint, "..", ".valet-jobs", slug(ticketId));
+// reproduced live: both real call sites (index.ts's handleAnswer/handleImplement) pass
+// SIDEPROJECTS_DIR itself here, not a repo path — the old `path.join(x, "..", ...)` shape
+// (copied from jobDirFor, which DOES take a repo path) landed one level ABOVE sideprojects
+// entirely. Every resume silently failed with "no state.json" as a result — this directly
+// caused a real incident (duplicate dispatch after a blocked-question answer silently failed
+// and reset Linear state back to unstarted). No ".." here; this already IS the right base.
+export function jobDirForTicketId(sideprojectsDir: string, ticketId: string) {
+  return path.join(sideprojectsDir, ".valet-jobs", slug(ticketId));
 }
 
 export async function readState(jobDir: string): Promise<JobState | undefined> {
@@ -117,12 +123,21 @@ async function pollForSentinel(logPath: string, docPath: string, deadline: numbe
     // only the LAST occurrence counts — the agent's real sentinel is always its final line,
     // earlier ones can be false positives from it reading/quoting its own prompt. `fromOffset`
     // also keeps a resume from re-matching the previous cycle's sentinel still sitting in the file.
-    const lastBlocked = log.lastIndexOf("VALET_BLOCKED:");
-    const lastDone = log.lastIndexOf("VALET_DONE");
-    if (lastBlocked !== -1 && lastBlocked > lastDone) {
-      const m = log.slice(lastBlocked).match(/VALET_BLOCKED:\s*(.+)/);
-      if (m) return { sentinel: "blocked", question: m[1].trim() };
-    } else if (lastDone !== -1 && existsSync(docPath)) {
+    // reproduced live: a plain substring search matched "VALET_BLOCKED:" INSIDE the prompt's own
+    // instructional sentence ("`VALET_BLOCKED: ` followed immediately by your actual question
+    // and its options") when the agent echoed it mid-reasoning — produced a corrupted "blocked"
+    // status with that boilerplate text as the "question". The prompt's own contract is "your
+    // final message must end with exactly one literal line" — a genuine sentinel always starts a
+    // line; requiring that anchor rejects boilerplate quoted inline in a paragraph.
+    const blockedMatches = [...log.matchAll(/^VALET_BLOCKED:\s*(.+)$/gm)];
+    const doneMatches = [...log.matchAll(/^VALET_DONE\b.*$/gm)];
+    const lastBlockedMatch = blockedMatches.at(-1);
+    const lastDoneMatch = doneMatches.at(-1);
+    const lastBlocked = lastBlockedMatch?.index ?? -1;
+    const lastDone = lastDoneMatch?.index ?? -1;
+    if (lastBlockedMatch && lastBlocked > lastDone) {
+      return { sentinel: "blocked", question: lastBlockedMatch[1].trim() };
+    } else if (lastDoneMatch && lastDone !== -1 && existsSync(docPath)) {
       return { sentinel: "done" };
     }
   }
