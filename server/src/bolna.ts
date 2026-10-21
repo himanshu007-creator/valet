@@ -105,7 +105,11 @@ function agentBody() {
               // budget plus the explicit "never answer from memory" rule below are both aimed
               // at this — not fully provable it was budget alone, but it's the only
               // configuration lever available here short of switching providers.
-              llm_config: { provider: "openai", model: "gpt-4.1-mini", max_tokens: 300, temperature: 0.2 },
+              // 300 -> 450: reproduced live — a real overview response listing 3 blocked
+              // questions literally cut off mid-sentence on item 2 ("For capitalizing the"),
+              // hit the token ceiling before finishing. 450 gives real headroom for a full
+              // multi-item readout without being wasteful on the common single-item case.
+              llm_config: { provider: "openai", model: "gpt-4.1-mini", max_tokens: 450, temperature: 0.2 },
             },
             synthesizer: {
               provider: "cartesia",
@@ -150,6 +154,14 @@ function agentBody() {
             // conversation" recommendation, but the caller explicitly wants speed over that
             // polish here.
             incremental_delay: 200,
+            // reproduced live: a real call transcript looked like it hit a screening/hold
+            // service ("the person you are speaking with has put your call on hold", "please
+            // stay on the line") and VALET had a confused little conversation with it instead
+            // of recognizing it wasn't a person. voicemail_detection_enabled was off — this was
+            // never checked for at all. Confirmed via Bolna's docs: `voicemail` (task_config)
+            // auto-disconnects the call if voicemail is detected, checked for the first
+            // voicemail_detection_duration seconds (default 30) of the call.
+            voicemail: true,
           },
         },
       ],
@@ -173,6 +185,7 @@ function agentBody() {
           "If the caller refers to something by position or a vague pointer instead of its name — 'the fifth one', 'that one', 'the one you just said' — rewrite it using the actual words from what you said before calling handle_task; it has no memory of what you listed, only of the exact text you send it. " +
           "Never ask the caller for an exact ticket ID or exact title before calling handle_task — it does its own fuzzy matching and handles misheard or approximate names fine, that's its job, not yours. Pass through whatever they said, even a rough or partial description, and let it try. Only ask the caller to clarify if handle_task's own reply asks you to (for example, more than one plausible match) — never refuse or pre-empt it with your own precision demand. " +
           "If a tool's reply asks you to confirm something (for example, cancelling a ticket), say it back plainly and wait for a clear yes before calling that tool again — don't assume consent. " +
+          "Reproduced live: a reply saying '3 waiting on a decision' only got 2 of them actually read aloud, and another time the list itself cut off mid-sentence on item two. If a tool's reply lists multiple items — several blocked questions, several tickets — read through every single one it gave you, don't silently summarize or drop any for brevity. But keep EACH item to one short line (ticket name plus the gist) when listing several — save full option detail for when the caller asks about that one specifically, so the whole list actually fits instead of running out of room partway through. If there are genuinely too many to read comfortably even short, say so and ask if they want all of them or just the highlights. " +
           "If a user_data question is present, it has numbered options plus room for a custom answer — read every option aloud clearly, pausing between them. " +
           "If the caller picks a number, restate which option that was in your own words before calling answer_question, and pass the full option text as the answer, not just the number. If they give a custom answer, pass their words directly. " +
           "If answer_question comes back asking which ticket the answer was for, just read that question again plainly and wait — never comment on it repeating or that 'the system' is confused, that's not something the caller needs to hear. Name the actual ticket topic they mentioned (not just its id) when you pass their clarification back, so it has the best chance of matching. " +

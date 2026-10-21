@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, chmod, copyFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, chmod, copyFile, readdir, stat, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -61,6 +61,30 @@ const TIMEOUT_MS = 20 * 60 * 1000;
 
 export function slug(ticketId: string) {
   return ticketId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+// reproduced live, definitively: opencode hangs forever inside a git worktree (`.git` is a
+// gitdir-pointer FILE, not a real directory) — confirmed by running the exact same prompt
+// against a plain clone of the identical repo content (done in ~18s) vs. the same repo via
+// `git worktree add` (hung indefinitely, zero network activity, across two opencode versions).
+// Each ticket now gets a real local clone instead of a worktree — same per-ticket isolation
+// goal, more disk, but it's the only thing that actually works. A local-path clone's `origin`
+// defaults to the local source path, not the real GitHub remote — fixed up explicitly below, or
+// every later `git push` would silently push to the other local directory instead of GitHub.
+async function setupWorkdir(repoPath: string, dir: string, branch: string, baseRef: string): Promise<void> {
+  if (existsSync(dir)) await rm(dir, { recursive: true, force: true });
+  const { stdout: realOrigin } = await exec("git", ["remote", "get-url", "origin"], { cwd: repoPath }).catch(() => ({ stdout: "" }));
+  await exec("git", ["clone", repoPath, dir]);
+  if (realOrigin.trim()) {
+    await exec("git", ["remote", "set-url", "origin", realOrigin.trim()], { cwd: dir });
+    // covers resuming a ticket's own already-pushed branch — it may only exist on the real
+    // remote, not in the local source repo's own refs (which is what the clone above copied).
+    await exec("git", ["fetch", "origin"], { cwd: dir }).catch(() => {});
+  }
+  await exec("git", ["checkout", "-B", branch, baseRef], { cwd: dir }).catch(async (err) => {
+    console.log(`checkout against ${baseRef} failed (${err.message?.split("\n")[0]}), retrying off HEAD`);
+    await exec("git", ["checkout", "-B", branch], { cwd: dir });
+  });
 }
 
 function render(template: string, ticket: Ticket, extra: Record<string, string> = {}) {
@@ -159,7 +183,15 @@ async function launch(jobDir: string, cwd: string, dataDir: string, logPath: str
   // trades reasoning depth for speed — the explicit ask here ("blazing speed") over the default
   // reasoning effort. Combined with the prompts' own "be decisive, minimize outside research"
   // instructions above — those cut wall-clock research/tool-call time, this cuts model latency.
-  const script = `#!/bin/bash\nexport PATH="${process.env.PATH}"\nprintf '\\033]0;${tabTitle}\\007'\ncd "${cwd}"\nXDG_DATA_HOME="${dataDir}" opencode run ${opencodeExtraArgs}--variant minimal --auto "$(cat "${messagePath}")" 2>&1 | tee ${teeArgs} "${logPath}"\n`;
+  // --pure: reproduced live (isolated repro — same XDG_DATA_HOME, same cwd, with vs without this
+  // flag) a full, silent hang the instant opencode needed a real tool call, every single time,
+  // with it: no hang, same task done in 27s. The user's globally-configured MCP servers (Pencil,
+  // Slack, Figma, remote Linear, remote Stitch) are personal interactive tools opencode tries to
+  // connect to on startup — irrelevant to an automated headless research/impl job, and at least
+  // one of them (likely a remote one with no way to complete auth headlessly) was hanging the
+  // whole session before any output. VALET's own Linear calls go through linear.ts directly, not
+  // this MCP server, so skipping it costs nothing.
+  const script = `#!/bin/bash\nexport PATH="${process.env.PATH}"\nprintf '\\033]0;${tabTitle}\\007'\ncd "${cwd}"\nXDG_DATA_HOME="${dataDir}" opencode run ${opencodeExtraArgs}--pure --variant minimal --auto "$(cat "${messagePath}")" 2>&1 | tee ${teeArgs} "${logPath}"\n`;
   await writeFile(scriptPath, script);
   await chmod(scriptPath, 0o755);
   if (headless) {
@@ -217,17 +249,9 @@ export async function runJob(resolved: ResolvedRepo, ticket: Ticket, jobId: stri
     await exec("git", ["init", "-b", "main"], { cwd: resolved.repoPath });
     await exec("git", ["commit", "--allow-empty", "-m", "init"], { cwd: resolved.repoPath }).catch(() => {});
   }
-  // -B (not -b): a stale branch/worktree from an earlier crashed or orphaned attempt on the
-  // same ticket must not block a fresh order — reset to a clean branch off origin/main instead.
-  if (existsSync(worktreeDir)) {
-    await exec("git", ["worktree", "remove", worktreeDir, "--force"], { cwd: resolved.repoPath }).catch(() => {});
-  }
-  await exec("git", ["worktree", "add", worktreeDir, "-B", branch, "origin/main"], { cwd: resolved.repoPath }).catch(async (err) => {
-    // still no usable origin/main (e.g. a genuinely brand-new repo with no remote yet) —
-    // fall back to branching off whatever HEAD exists locally rather than hard-failing the job.
-    console.log(`worktree add against origin/main failed (${err.message?.split("\n")[0]}), retrying off HEAD`);
-    await exec("git", ["worktree", "add", worktreeDir, "-B", branch], { cwd: resolved.repoPath });
-  });
+  // -B (not -b): a stale clone from an earlier crashed or orphaned attempt on the same ticket
+  // must not block a fresh order — setupWorkdir wipes and recreates it off origin/main.
+  await setupWorkdir(resolved.repoPath, worktreeDir, branch, "origin/main");
   await copyEnvFiles(resolved.repoPath, worktreeDir);
 
   const prompt = render(IMPL_PROMPT, ticket);
@@ -265,8 +289,13 @@ export async function resumeJob(jobDir: string, answer: string, headless = false
   if (!sessionId) throw new Error(`no opencode session found for ${state.ticketId} to resume`);
 
   const offset = (await stat(state.logPath).catch(() => undefined))?.size ?? 0;
+  // reproduced live: resuming with just the raw answer text let the model treat "got the
+  // answer" as the whole job — it emitted VALET_DONE immediately with zero tool calls, never
+  // touching the doc. The file's Open Questions section still showed the raw unanswered
+  // question verbatim afterward. Be explicit that the answer has to actually land in the file.
   const answerPath = path.join(jobDir, `answer-${Date.now()}.md`);
-  await writeFile(answerPath, answer);
+  const answerPrompt = `The caller answered the open question: "${answer}"\n\nUpdate the relevant file(s) to actually reflect this decision — resolve the Open Questions section (replace it with what was decided, don't leave the raw question sitting there unanswered) and make any other change the answer implies. Then finish with VALET_DONE, or VALET_BLOCKED again if this raises a new question.`;
+  await writeFile(answerPath, answerPrompt);
   const tabTitle = `${state.ticketId}: ${state.ticketTitle}`.replace(/'/g, "").slice(0, 60);
   const tabId = await launch(jobDir, cwd, state.dataDir, state.logPath, tabTitle, answerPath, `-s ${sessionId} `, true, headless);
 
@@ -310,7 +339,7 @@ export async function implementJob(researchState: JobState, jobId: string, headl
 
   const { worktreeDir, branch } = researchState;
   if (!existsSync(worktreeDir)) {
-    await exec("git", ["worktree", "add", worktreeDir, "-B", branch, `origin/${branch}`], { cwd: researchState.repoPath });
+    await setupWorkdir(researchState.repoPath, worktreeDir, branch, `origin/${branch}`);
   }
 
   const ticket: Ticket = { id: researchState.ticketId, title: researchState.ticketTitle, description: "" };

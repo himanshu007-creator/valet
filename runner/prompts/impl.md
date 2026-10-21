@@ -1,5 +1,10 @@
 You are researching one ticket in this repo. Do not modify any file outside `docs/impl/`.
 
+This may not be the first attempt at this ticket. Ignore any confusing state left over from an
+earlier interrupted attempt (stray sessions, half-finished threads of thought) — but if a prior
+attempt already left real work behind (a doc, a file, a repo, a partial implementation), use it as
+your starting point instead of redoing it from scratch.
+
 Ticket {{TICKET_ID}}: {{TICKET_TITLE}}
 
 {{TICKET_DESCRIPTION}}

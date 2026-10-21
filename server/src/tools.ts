@@ -24,6 +24,25 @@ async function runnerConnectedWithRetry(): Promise<boolean> {
   return runnerConnected();
 }
 
+// a job can sit at status='blocked' forever if the ticket gets resolved another way — marked
+// done/cancelled directly in Linear, or any path other than actually answering the question —
+// nothing before this ever cleared the DB row to match. Reproduced live: VALET kept re-asking
+// about HIM-11 and HIM-12 long after both were marked Completed directly in Linear. Linear is
+// the real source of truth for "is this still open" — check it live on every read instead of
+// trusting the DB's own stale status column.
+async function liveBlockedJobs() {
+  const rows = await sql`select id, ticket_id, title, question from jobs where status = 'blocked' order by finished_at desc`;
+  const checked = await Promise.all(
+    rows.map(async (r) => {
+      const issue = await getIssueById(r.ticket_id).catch(() => undefined);
+      // no issue found (deleted/archived), or no longer in a started-type state (completed,
+      // cancelled, or reset back to todo some other way) — the question is moot either way.
+      return issue && issue.state?.type === "started" ? r : null;
+    }),
+  );
+  return checked.filter((r) => r !== null);
+}
+
 export async function toolGetPriorities(): Promise<string> {
   return getPrioritiesSummary();
 }
@@ -132,13 +151,15 @@ export async function toolGetStatusAll(): Promise<string> {
   // same transient-reconnect tolerance as the action-gating checks — this IS the answer to
   // "is my mac connected," so it needs to be at least as resilient as those, not less.
   const online = await runnerConnectedWithRetry();
-  const jobs = await sql`select status, title, question from jobs where status in ('queued', 'running', 'blocked')`;
+  const [activeJobs, blocked] = await Promise.all([
+    sql`select status, title from jobs where status in ('queued', 'running')`,
+    liveBlockedJobs(),
+  ]);
   const parts: string[] = [online ? "The runner on your Mac is connected." : "The runner on your Mac isn't connected right now."];
-  if (jobs.length === 0) {
+  if (activeJobs.length === 0 && blocked.length === 0) {
     parts.push("Nothing running right now.");
   } else {
-    const running = jobs.filter((j) => j.status === "queued" || j.status === "running").length;
-    const blocked = jobs.filter((j) => j.status === "blocked");
+    const running = activeJobs.length;
     const bits: string[] = [];
     if (running > 0) bits.push(`${running} running`);
     if (blocked.length > 0) bits.push(`${blocked.length} waiting on a decision from you`);
@@ -185,7 +206,7 @@ export async function toolGetStatusAll(): Promise<string> {
 
 export async function toolAnswerQuestion(answer: string): Promise<string> {
   if (!answer) return "I didn't catch an answer.";
-  const blocked = await sql`select id, ticket_id, title, question from jobs where status = 'blocked' order by finished_at desc`;
+  const blocked = await liveBlockedJobs();
   if (blocked.length === 0) return "There's nothing waiting on an answer right now.";
 
   let job = blocked[0];
@@ -267,7 +288,7 @@ function parseStatusWord(text: string): { type: "started" | "unstarted" | "compl
 const WANTS_PENDING_LIST = /\b(go(ing)? through|continue (with|for|on)?|what (are|were) the)\b.*\b(pending|blocked|open|those|them)\b|\b(pending|blocked|open) (decision|question|task)s?\b/i;
 
 async function listBlockedQuestions(): Promise<string> {
-  const blocked = await sql`select title, question from jobs where status = 'blocked' order by finished_at desc`;
+  const blocked = await liveBlockedJobs();
   if (blocked.length === 0) return "There's nothing waiting on a decision right now.";
   return blocked.map((b) => `On ${b.title}: ${b.question ?? "no question text recorded"}.`).join(" ");
 }

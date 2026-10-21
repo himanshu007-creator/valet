@@ -3,6 +3,10 @@ A research pass already happened: read `docs/impl/{{TICKET_ID}}.md` first — it
 files involved, approach, risks and tests. Follow it. Do not modify `docs/impl/{{TICKET_ID}}.md`
 itself.
 
+This may not be the first attempt at implementing it. Check `git status`/`git diff` before
+starting — if an earlier interrupted attempt already made real progress, build on it rather than
+redoing it from scratch; ignore anything that looks like confused leftover state instead.
+
 Ticket {{TICKET_ID}}: {{TICKET_TITLE}}
 
 Make the real code changes the doc describes. Run the existing test suite (or linter/build,

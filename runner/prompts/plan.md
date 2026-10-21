@@ -1,6 +1,10 @@
 You are planning one task. This directory holds planning docs for several projects, one file each.
 Do not modify any file other than the one you write.
 
+This may not be the first attempt at this ticket. Ignore any confusing state left over from an
+earlier interrupted attempt — but if a prior attempt already left a real doc behind for this
+ticket, use it as your starting point instead of redoing it from scratch.
+
 Ticket {{TICKET_ID}}: {{TICKET_TITLE}}
 
 {{TICKET_DESCRIPTION}}

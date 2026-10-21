@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import WebSocket from "ws";
 import { runJob, resumeJob, implementJob, readState, jobDirForTicketId, type Ticket, type JobState, type JobResult } from "./job.ts";
-import { resolveRepo } from "./repo.ts";
+import { resolveRepo, AmbiguousRepoError } from "./repo.ts";
 
 const exec = promisify(execFile);
 
@@ -94,6 +94,11 @@ function drain(ws: WebSocket) {
       .then((result) => sendResult(ws, jobId, result))
       .catch((err) => {
         console.error("job failed", ticket.id, err);
+        if (err instanceof AmbiguousRepoError) {
+          const options = err.candidates.map((c, i) => `(${i + 1}) ${c}`).join(". ");
+          ws.send(JSON.stringify({ type: "status", jobId, status: "blocked", question: `Which repo does this belong to — ${options}? Or tell me to create a new one.` }));
+          return;
+        }
         ws.send(JSON.stringify({ type: "status", jobId, status: "failed", error: err.message }));
       })
       .finally(() => {

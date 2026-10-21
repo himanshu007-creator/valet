@@ -10,6 +10,19 @@ function log(question: string, answer: string, confidence: number) {
   console.log(`[jev] ${question} -> ${answer} (confidence ${confidence.toFixed(2)})`);
 }
 
+// reproduced live: "start work on HIM-12" — the ticket ID spelled out verbatim — still fell
+// through Jev's ticket match to "no confident match," which routed into create-then-execute
+// and spawned a brand-new duplicate ticket literally titled "start work on HIM-12" instead of
+// starting the real HIM-12. A literal ID mention is the one case that should never be a
+// judgment call for an LLM — check it deterministically before spending a Jev round trip.
+function literalIdMatch(request: string, candidates: { id: string; title: string }[]): string | null {
+  for (const c of candidates) {
+    const re = new RegExp(`\\b${c.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (re.test(request)) return c.id;
+  }
+  return null;
+}
+
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
   for (let i = 0; i <= a.length; i++) dp[i][0] = i;
@@ -83,10 +96,12 @@ export async function classifyAndMatch(
   request: string,
   candidates: { id: string; title: string }[],
 ): Promise<{ intent: TaskIntent; intentConfidence: number; ticketId: string | null; ticketConfidence: number }> {
+  const literalId = literalIdMatch(request, candidates);
+
   const questions: Record<string, ReturnType<typeof choice>> = {
     intent: choice("What kind of task-management action is the caller asking for", INTENT_CRITERIA),
   };
-  if (candidates.length > 0) {
+  if (candidates.length > 0 && !literalId) {
     questions.ticket = choice("Which existing ticket, if any, is the caller referring to", {
       ...Object.fromEntries(candidates.map((c) => [c.id, c.title])),
       none: "No existing ticket is a close match",
@@ -97,9 +112,11 @@ export async function classifyAndMatch(
   const intentAnswer = res.answers.intent as { choice: string; confidence: number };
   log("intent", intentAnswer.choice, intentAnswer.confidence);
 
-  let ticketId: string | null = null;
-  let ticketConfidence = 0;
-  if (candidates.length > 0) {
+  let ticketId: string | null = literalId;
+  let ticketConfidence = literalId ? 1 : 0;
+  if (literalId) {
+    console.log(`[literal] ticket -> ${literalId}`);
+  } else if (candidates.length > 0) {
     const ticketAnswer = res.answers.ticket as { choice: string; confidence: number };
     log("ticket", ticketAnswer.choice, ticketAnswer.confidence);
     ticketId = ticketAnswer.choice === "none" ? null : ticketAnswer.choice;
@@ -131,6 +148,11 @@ export async function matchTicket(
   candidates: { id: string; title: string }[],
 ): Promise<{ id: string | null; confidence: number }> {
   if (candidates.length === 0) return { id: null, confidence: 0 };
+  const literalId = literalIdMatch(request, candidates);
+  if (literalId) {
+    console.log(`[literal] ticket -> ${literalId}`);
+    return { id: literalId, confidence: 1 };
+  }
   const res = await client.systemOne({
     state: request,
     questions: {
