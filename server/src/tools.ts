@@ -145,9 +145,14 @@ export async function toolGetStatusAll(): Promise<string> {
     parts.push(bits.join(", ") + ".");
     // a blocked count alone forces the caller to ask "what's the question" as a second
     // round-trip — just say it, same spell-out-vs-summarize rule as undelivered terminal jobs.
+    // Past that, offer to go through them rather than silently withholding the questions —
+    // reproduced live: a caller who heard just "four waiting on a decision" said "let's continue
+    // for pending decisions" next, which had nowhere to go (see WANTS_PENDING_LIST below).
     const SPELL_OUT = 3;
     if (blocked.length > 0 && blocked.length <= SPELL_OUT) {
       for (const j of blocked) if (j.question) parts.push(`On ${j.title}: ${j.question}`);
+    } else if (blocked.length > SPELL_OUT) {
+      parts.push("Want me to go through them?");
     }
   }
 
@@ -253,6 +258,20 @@ function parseStatusWord(text: string): { type: "started" | "unstarted" | "compl
   return null;
 }
 
+// reproduced live: "let's continue for pending decisions" (following an overview that said
+// "4 waiting on a decision, want me to go through them?") had no real destination — Jev's
+// router has no ticket name to match on a phrase like this, so it either misfired into
+// "overview" again (same unhelpful answer, no progress) or "execute"/"create" (a phantom ticket
+// from the words "let's continue for pending decision"). This is deterministic on purpose: no
+// ticket name needed, just list what's actually blocked.
+const WANTS_PENDING_LIST = /\b(go(ing)? through|continue (with|for|on)?|what (are|were) the)\b.*\b(pending|blocked|open|those|them)\b|\b(pending|blocked|open) (decision|question|task)s?\b/i;
+
+async function listBlockedQuestions(): Promise<string> {
+  const blocked = await sql`select title, question from jobs where status = 'blocked' order by finished_at desc`;
+  if (blocked.length === 0) return "There's nothing waiting on a decision right now.";
+  return blocked.map((b) => `On ${b.title}: ${b.question ?? "no question text recorded"}.`).join(" ");
+}
+
 export async function toolHandleTask(request: string): Promise<string> {
   const text = (request ?? "").trim();
   if (!text) return "I didn't catch what you'd like me to do.";
@@ -286,6 +305,8 @@ export async function toolHandleTask(request: string): Promise<string> {
     }
   }
   pendingCreate = null;
+
+  if (WANTS_PENDING_LIST.test(text)) return listBlockedQuestions();
 
   const issues = await getCachedIssues();
   const candidates = issues.map((i) => ({ id: i.identifier, title: i.title }));

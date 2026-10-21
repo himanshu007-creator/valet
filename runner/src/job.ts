@@ -54,7 +54,9 @@ export type JobState = {
 const IMPL_PROMPT = await readFile(new URL("../prompts/impl.md", import.meta.url), "utf8");
 const PLAN_PROMPT = await readFile(new URL("../prompts/plan.md", import.meta.url), "utf8");
 const IMPLEMENT_PROMPT = await readFile(new URL("../prompts/implement.md", import.meta.url), "utf8");
-const POLL_MS = 3_000;
+// 3s -> 1.2s: pure detection latency on top of however long opencode itself takes — cheap to
+// shrink (one file read), and every poll cycle saved is seconds off the caller's perceived wait.
+const POLL_MS = 1_200;
 const TIMEOUT_MS = 20 * 60 * 1000;
 
 export function slug(ticketId: string) {

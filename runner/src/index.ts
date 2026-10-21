@@ -54,6 +54,9 @@ function connect() {
     isAlive = true;
   });
   const heartbeat = setInterval(() => {
+    // reproduced live: a ping fired while still CONNECTING (slow reconnect) throws
+    // synchronously and crashes the whole process — only ping once actually OPEN.
+    if (ws.readyState !== WebSocket.OPEN) return;
     if (!isAlive) {
       console.log("no pong since last heartbeat, forcing reconnect");
       return ws.terminate();

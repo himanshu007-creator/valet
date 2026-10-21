@@ -79,12 +79,16 @@ function agentBody() {
   return {
     agent_config: {
       agent_name: "VALET",
-      // reproduced live: this plays before the model's own first turn, on every call either
-      // direction, so it can't say anything direction-specific itself without risking undocumented
-      // variable-substitution behavior. Kept neutral on purpose — the model's first-turn overview
-      // call (below) already leads with pending news before asking "what are we doing," which is
-      // exactly the right framing for a callback (always has news) vs. an inbound call (may not).
-      agent_welcome_message: "Hey, it's VALET.",
+      // reproduced live: the model's own first turn only ever runs in response to transcribed
+      // caller speech (confirmed against Bolna's docs — there is no "agent speaks first" turn
+      // trigger) — a caller who answers a callback and says nothing gets only this static line,
+      // then silence, then hangup_after_silence. {update} is Bolna's own `{variable}` templating
+      // (confirmed in their docs: filled from the /call request's user_data, renders empty if
+      // unset), so triggerCallback now fills it with the actual news — the caller hears the real
+      // update immediately, with zero LLM round trip, even if they never say a word. Inbound
+      // calls have no per-call user_data, so {update} renders empty there — harmless trailing
+      // silence, and the first-turn overview call below still covers that case.
+      agent_welcome_message: "Hey, it's VALET. {update}",
       webhook_url: `${env.publicUrl}/hooks/bolna`,
       tasks: [
         {
@@ -123,13 +127,30 @@ function agentBody() {
               stream: true,
               encoding: "linear16",
               sampling_rate: 16000,
-              endpointing: 250,
+              // 250 -> 200: caller said the agent feels slow to react. Below Bolna's own
+              // "200-300ms" recommended range trades a little transcription accuracy for a
+              // faster perceived response, which is the explicit ask.
+              endpointing: 200,
             },
             input: { provider: "twilio", format: "wav" },
             output: { provider: "twilio", format: "wav" },
             api_tools: tools,
           },
-          task_config: { call_terminate: 300, hangup_after_silence: 10, hangup_after_LLMCall: true },
+          task_config: {
+            call_terminate: 300,
+            hangup_after_silence: 10,
+            hangup_after_LLMCall: true,
+            // confirmed via Bolna's docs: number_of_words_for_interruption (default 2) is how
+            // many words of caller speech it waits for before cutting the agent off — reproduced
+            // live as sluggish barge-in ("I start speaking, it doesn't stop"). 1 means it stops
+            // on the very first word, as close to instant as the platform allows.
+            number_of_words_for_interruption: 1,
+            // incremental_delay (default 400ms) is the linear delay added before speaking on
+            // each interim ASR transcript — Bolna's own docs call 400-500 the "natural
+            // conversation" recommendation, but the caller explicitly wants speed over that
+            // polish here.
+            incremental_delay: 200,
+          },
         },
       ],
     },
@@ -141,7 +162,8 @@ function agentBody() {
           "Handle small talk naturally and briefly — if asked how you're doing, answer like a person would in one line, then ask what they want to work on. " +
           "Short sounds like 'mm-hm', 'okay', 'right', 'yeah' while you're mid-sentence are the caller following along, not a new turn — keep going, don't stop and ask what they need. " +
           "If the caller cuts you off partway through a sentence, don't assume they heard the part you didn't finish — when it matters (an option list, a confirmation, a number), briefly pick back up from what they likely missed instead of answering as if they'd heard all of it. " +
-          "On the first turn, call handle_task with 'overview of everything in progress' before saying anything substantive. If it reports anything blocked, finished, or failed, open with 'Calling with an update —' and lead with that, don't wait to be asked. Only if there's genuinely nothing to report should you ask what's going on. " +
+          "Check your own welcome message, the very first line of this call: if it already said something concrete after 'Hey, it's VALET' — a ticket, a decision, an error — that already IS the update, don't call handle_task again to re-fetch it. If a decision is needed, that's your next line — say what you need from them, then stop talking and wait, don't keep narrating. If nothing further is needed, just see what they say next; don't restate the update. " +
+          "If your welcome message had nothing after 'Hey, it's VALET' — meaning there was no update to deliver — call handle_task with 'overview of everything in progress' before saying anything else substantive. If it reports anything blocked, finished, or failed, open with 'Calling with an update —' and lead with that. Only if there's genuinely nothing to report should you ask what's going on. " +
           "Two different questions sound similar but need different tools: 'what's running / in progress / going on' is about active work — call handle_task. 'what can I work on / what are my tickets / what's on my plate' is asking for the list of available tickets to pick from — call get_priorities, not handle_task, even if they phrase it like a task request. " +
           "For any other task request — start, create, check on, cancel, or directly mark/set a ticket's status (done, in progress, todo) without actually running anything, or if they ask whether the runner on their Mac is connected — call handle_task with the caller's own words, close to verbatim. 'Mark it done' and 'start it' are different requests — don't treat marking something done as a reason to run it. " +
           "Never answer a task question from memory or from something said earlier in this call, even if you're confident — always call handle_task fresh, every single time, no exceptions. The real status can change between turns, and a remembered answer can be wrong. " +
@@ -180,10 +202,14 @@ export async function triggerCallback(toNumber: string, summary: string, questio
   // live that it picked a US number the caller had never seen before, which got auto-flagged
   // as spam and silently blocked before ever ringing. Force it to use VALET's own registered
   // number, the one the caller already knows and has called in on.
+  // `update` fills agent_welcome_message's {update} placeholder (confirmed Bolna templating,
+  // see the comment on agent_welcome_message) — this is the actual spoken news, delivered
+  // instantly as the welcome message itself, no LLM turn required to say it.
+  const update = question ? `${summary} ${question}` : summary;
   return bolnaFetch("/call", {
     agent_id: process.env.BOLNA_AGENT_ID,
     recipient_phone_number: toNumber,
     from_phone_number: env.twilioNumber || undefined,
-    user_data: { summary, question: question ?? "" },
+    user_data: { update, summary, question: question ?? "" },
   });
 }

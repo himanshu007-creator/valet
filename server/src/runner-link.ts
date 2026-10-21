@@ -35,7 +35,7 @@ export async function catchUpIfNeeded() {
 
   lastCatchupAttempt = Date.now();
   console.log(`catching up: ${undelivered.n} undelivered, ${blocked.n} blocked`);
-  await triggerCallback(env.allowedCallerNumber, "catching up on what happened while you were on a call").catch((err) =>
+  await triggerCallback(env.allowedCallerNumber, "Catching up on what happened while you were on a call.").catch((err) =>
     console.error("catch-up callback failed", err),
   );
 }
