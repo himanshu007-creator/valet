@@ -55,7 +55,7 @@ function fuzzyWordMatch(request: string, candidates: { id: string; title: string
   return best;
 }
 
-export type TaskIntent = "create" | "execute" | "probe" | "delete" | "overview";
+export type TaskIntent = "create" | "execute" | "probe" | "delete" | "update_status" | "overview";
 
 // Each description doubles as a few-shot example set — concrete phrasings score noticeably
 // better than abstract definitions for a classifier this size, and these are the actual
@@ -63,9 +63,12 @@ export type TaskIntent = "create" | "execute" | "probe" | "delete" | "overview";
 // three different ways in one call — "featbit" heard as "feedbit"/"feedback"/"fitbit").
 const INTENT_CRITERIA = {
   create: "Start brand-new work with no existing ticket. 'let's build X', 'we need a Y', 'set up Z', 'can you add a ticket for W'",
-  execute: "Begin or resume work on one ticket that should already exist. 'start the auth one', 'let's do the billing ticket', 'go ahead on X', 'work on Y'",
+  execute: "Begin or resume VALET's own automated research/work on one ticket — actually dispatches a background job, not just a status label change. 'start the auth one', 'let's do the billing ticket', 'go ahead on X', 'work on Y'",
   probe: "Ask about one specific ticket by name, topic, or description — its status, whether it exists at all, or searching for it. 'is there anything about X', 'do we have a ticket for Y', 'how's the Z ticket doing', 'any update on W', 'what happened with the thing about V'",
-  delete: "Cancel, remove, or archive a ticket entirely. 'cancel X', 'forget about Y', 'we don't need Z anymore', 'close out W'",
+  delete: "Cancel, remove, or archive a ticket entirely — it should no longer exist as active work. 'cancel X', 'forget about Y', 'we don't need Z anymore', 'remove W'",
+  update_status:
+    "Directly set a ticket's status/state label without running any actual work on it — the caller is telling VALET the outcome, not asking it to go do something. " +
+    "'mark X as done', 'close out Y', 'set Z to done', 'update the status of W to in progress', 'that one's finished', 'put it back in the backlog'",
   overview:
     "A general summary of how much is in progress overall (not about one particular ticket), or a question about the system/connection itself. " +
     "'what's going on', 'how's everything going', 'what's running right now', 'is my mac connected', 'can you check the connection'",

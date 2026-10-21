@@ -234,6 +234,21 @@ const CREATE_CONFIDENCE_THRESHOLD = 0.7;
 const AFFIRM_RE = /\b(yes|yeah|yep|yup|confirm(ed)?|do it|go ahead|sure|please do)\b/i;
 const NEGATE_RE = /\b(no|don'?t|do not|nevermind|never mind|stop|cancel that)\b/i;
 
+// reproduced live: "update the status to running" has no real destination today — Jev has no
+// better bucket than "execute" for it, which dispatches an entire new research job instead of
+// just relabeling the ticket. This is the real destination: plain keyword match on a small,
+// known vocabulary, not another Jev round trip.
+const STATUS_WORD: { re: RegExp; type: "started" | "unstarted" | "completed"; label: string }[] = [
+  { re: /\b(done|complete(d)?|finish(ed)?|closed? out)\b/i, type: "completed", label: "done" },
+  { re: /\b(in progress|running|started|working on)\b/i, type: "started", label: "in progress" },
+  { re: /\b(todo|to do|backlog|not started|reopen(ed)?|open)\b/i, type: "unstarted", label: "todo" },
+];
+
+function parseStatusWord(text: string): { type: "started" | "unstarted" | "completed"; label: string } | null {
+  for (const w of STATUS_WORD) if (w.re.test(text)) return { type: w.type, label: w.label };
+  return null;
+}
+
 export async function toolHandleTask(request: string): Promise<string> {
   const text = (request ?? "").trim();
   if (!text) return "I didn't catch what you'd like me to do.";
@@ -317,6 +332,17 @@ export async function toolHandleTask(request: string): Promise<string> {
       if (!issue) return "I couldn't find a matching ticket to cancel.";
       pendingDelete = { ticketId: id, issueId: issue.id, title: issue.title, expiresAt: Date.now() + 2 * 60 * 1000 };
       return `Just to confirm — cancel ${id}, "${issue.title}"? Say yes to archive it.`;
+    }
+
+    case "update_status": {
+      if (!id) return "I couldn't find a matching ticket to update.";
+      const target = parseStatusWord(text);
+      if (!target) return "What status would you like me to set it to — done, in progress, or back to the backlog?";
+      const issue = await getIssueById(id);
+      if (!issue) return "I couldn't find a matching ticket to update.";
+      await setIssueState(issue.id, target.type);
+      invalidateIssueCache();
+      return `Done — marked ${id} as ${target.label}.`;
     }
 
     case "execute":

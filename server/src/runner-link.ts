@@ -18,7 +18,11 @@ let runnerSocket: WebSocket | null = null;
 // callback if so. That callback's first turn calls handle_task's overview like any other call,
 // which is what actually marks things delivered — never optimistically marked here, so a call
 // that itself goes unanswered just leaves the news to be retried, not silently lost.
-let lastCatchupAttempt = 0;
+// starts at "just fired", not 0 — reproduced live: a deploy resets this to 0, and the very next
+// call-end webhook (which can legitimately be the user's own call landing right after a
+// restart) triggered an immediate, undebounced catch-up call that overlapped with it. A fresh
+// process waits out one full debounce window before its first catch-up attempt, like any other.
+let lastCatchupAttempt = Date.now();
 const CATCHUP_DEBOUNCE_MS = 2 * 60 * 1000;
 
 export async function catchUpIfNeeded() {
