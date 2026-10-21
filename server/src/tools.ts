@@ -53,13 +53,15 @@ export async function toolOrder(ticketsArg: string): Promise<string> {
   return `Starting on ${found.length} thing${found.length > 1 ? "s" : ""}. I'll call you when they're done.`;
 }
 
-const STATUS_WORDS: Record<string, string> = {
-  queued: "queued",
-  running: "in progress",
-  done: "done",
-  blocked: "waiting on a decision from you",
-  failed: "hit an error",
-  timeout: "timed out",
+// full phrases, not words to fill into a fixed "X is ___" template — "X is hit an error" is
+// broken English, reproduced live via toolProbeTask's old STATUS_WORDS[status] lookup.
+const STATUS_PHRASE: Record<string, (title: string) => string> = {
+  queued: (t) => `${t} is queued`,
+  running: (t) => `${t} is in progress`,
+  done: (t) => `${t} is done`,
+  blocked: (t) => `${t} is waiting on a decision from you`,
+  failed: (t) => `${t} hit an error`,
+  timeout: (t) => `${t} timed out`,
 };
 
 async function checkPrStatus(prUrl: string): Promise<string | null> {
@@ -92,7 +94,8 @@ export async function toolProbeTask(ticketId: string): Promise<string> {
     order by finished_at desc nulls first, started_at desc nulls last limit 1
   `;
   if (!job) return `I don't have anything on ${ticketId} yet.`;
-  const parts = [`${job.title} is ${STATUS_WORDS[job.status] ?? job.status}.`];
+  const phrase = STATUS_PHRASE[job.status] ?? ((t: string) => `${t} is ${job.status}`);
+  const parts = [`${phrase(job.title)}.`];
   if (job.status === "blocked" && job.question) parts.push(`Waiting on: ${job.question}`);
   if (job.pr_url) {
     const ci = await checkPrStatus(job.pr_url);
@@ -201,6 +204,13 @@ export async function toolImplement(ticketArg: string): Promise<string> {
 // hard-gated behind an explicit second confirmation regardless of Jev's confidence: a
 // destructive, voice-triggered action shouldn't go through on a single spoken "yes."
 let pendingDelete: { ticketId: string; issueId: string; title: string; expiresAt: number } | null = null;
+// a low-confidence "create" guess shouldn't silently clutter Linear with ASR noise — reproduced
+// live: a garbled fragment ("system task to feed with") at 0.60 intent confidence got created
+// as a real ticket before the caller could stop it. Same one-slot confirm pattern as delete,
+// just not hard-gated regardless of confidence the way delete is — a clear, high-confidence
+// "create a ticket for X" still goes straight through, no added friction for the common case.
+let pendingCreate: { title: string; description: string; expiresAt: number } | null = null;
+const CREATE_CONFIDENCE_THRESHOLD = 0.7;
 const AFFIRM_RE = /\b(yes|yeah|yep|yup|confirm(ed)?|do it|go ahead|sure|please do)\b/i;
 const NEGATE_RE = /\b(no|don'?t|do not|nevermind|never mind|stop|cancel that)\b/i;
 
@@ -223,6 +233,21 @@ export async function toolHandleTask(request: string): Promise<string> {
   }
   pendingDelete = null; // any other utterance drops a stale pending delete rather than guessing
 
+  if (pendingCreate && pendingCreate.expiresAt > Date.now()) {
+    if (NEGATE_RE.test(text)) {
+      pendingCreate = null;
+      return "Okay, not creating that.";
+    }
+    if (AFFIRM_RE.test(text)) {
+      const { title, description } = pendingCreate;
+      pendingCreate = null;
+      const issue = await createIssue(title, description);
+      invalidateIssueCache();
+      return `Created ${issue.identifier} — "${issue.title}".`;
+    }
+  }
+  pendingCreate = null;
+
   const issues = await getCachedIssues();
   const candidates = issues.map((i) => ({ id: i.identifier, title: i.title }));
 
@@ -234,7 +259,7 @@ export async function toolHandleTask(request: string): Promise<string> {
     console.error("jev routing failed", err);
     return "Sorry, I'm having trouble understanding that right now — could you try again in a moment?";
   }
-  const { intent, ticketId: id, ticketConfidence: confidence } = routed;
+  const { intent, intentConfidence, ticketId: id, ticketConfidence: confidence } = routed;
 
   switch (intent) {
     case "overview":
@@ -252,6 +277,10 @@ export async function toolHandleTask(request: string): Promise<string> {
         return `That sounds like it might already be ${id} — "${existing?.title}". Want me to start that instead?`;
       }
       const title = text.length > 80 ? text.slice(0, 80) : text;
+      if (intentConfidence < CREATE_CONFIDENCE_THRESHOLD) {
+        pendingCreate = { title, description: text, expiresAt: Date.now() + 2 * 60 * 1000 };
+        return `Want me to create a new ticket for "${title}"? Say yes to confirm.`;
+      }
       const issue = await createIssue(title, text);
       invalidateIssueCache();
       return `Created ${issue.identifier} — "${issue.title}".`;

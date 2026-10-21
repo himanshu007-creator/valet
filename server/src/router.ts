@@ -102,7 +102,12 @@ export async function classifyAndMatch(
     ticketId = ticketAnswer.choice === "none" ? null : ticketAnswer.choice;
     ticketConfidence = ticketAnswer.confidence;
 
-    if (ticketId === null) {
+    // reproduced live: "is my mac connected" fuzzy-matched a ticket by pure coincidence
+    // ("mac"/"connected" landing within edit distance of ordinary English words in some
+    // title) even though Jev was *maximally* confident ("none", 1.00) there was no ticket
+    // here at all. The fuzzy fallback exists to rescue cases where Jev itself was unsure —
+    // it must never override a confident Jev "none", only a shaky one.
+    if (ticketId === null && ticketConfidence < BAND.HIGH) {
       const fuzzy = fuzzyWordMatch(request, candidates);
       if (fuzzy) {
         console.log(`[fuzzy] ticket -> ${fuzzy.id} (edit distance ${fuzzy.distance})`);
@@ -134,7 +139,7 @@ export async function matchTicket(
   });
   const answer = res.answers.ticket;
   log("ticket", answer.choice, answer.confidence);
-  if (answer.choice === "none") {
+  if (answer.choice === "none" && answer.confidence < BAND.HIGH) {
     const fuzzy = fuzzyWordMatch(request, candidates);
     if (fuzzy) {
       console.log(`[fuzzy] ticket -> ${fuzzy.id} (edit distance ${fuzzy.distance})`);
@@ -142,5 +147,6 @@ export async function matchTicket(
     }
     return { id: null, confidence: answer.confidence };
   }
+  if (answer.choice === "none") return { id: null, confidence: answer.confidence };
   return { id: answer.choice, confidence: answer.confidence };
 }
