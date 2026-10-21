@@ -185,7 +185,11 @@ export async function toolAnswerQuestion(answer: string): Promise<string> {
 
   let job = blocked[0];
   if (blocked.length > 1) {
-    const candidates = blocked.map((b) => ({ id: b.ticket_id, title: b.question ?? b.title }));
+    // reproduced live: candidates used only the blocked question's text ("the repo lacks a
+    // changelog...") with no mention of the ticket's actual topic — a caller naturally saying
+    // "the featbit one" had nothing to match against and got the same disambiguation question
+    // asked right back at them. Include the ticket title so either phrasing matches.
+    const candidates = blocked.map((b) => ({ id: b.ticket_id, title: `${b.title} — ${b.question ?? ""}` }));
     try {
       const { id, confidence } = await matchTicket(answer, candidates);
       if (!id || confidence < BAND.LOW) {
