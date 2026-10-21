@@ -8,6 +8,7 @@ type Order = { id: string; createdAt: string; jobs: Job[] };
 
 export function History() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
@@ -17,9 +18,11 @@ export function History() {
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) return navigate("/login");
         setError("Couldn't load history right now.");
-      });
+      })
+      .finally(() => setLoading(false));
   }, [navigate]);
 
+  if (loading) return <p className="muted">Loading…</p>;
   if (error) return <p className="muted">{error}</p>;
   if (orders.length === 0) return <p className="muted">No orders yet.</p>;
 

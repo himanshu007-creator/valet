@@ -54,8 +54,8 @@ export async function toolOrder(ticketsArg: string): Promise<string> {
   const [order] = await sql`insert into orders (tickets) values (${toStart.map((i) => i!.identifier)}) returning id`;
   for (const issue of toStart) {
     const [job] = await sql`
-      insert into jobs (order_id, ticket_id, title, status)
-      values (${order.id}, ${issue!.identifier}, ${issue!.title}, 'queued')
+      insert into jobs (order_id, ticket_id, title, status, ticket_url, description)
+      values (${order.id}, ${issue!.identifier}, ${issue!.title}, 'queued', ${issue!.url}, ${issue!.description ?? null})
       returning id
     `;
     dispatchJob(job.id, { id: issue!.identifier, title: issue!.title, description: issue!.description ?? "" });

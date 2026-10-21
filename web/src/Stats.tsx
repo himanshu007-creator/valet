@@ -6,6 +6,7 @@ type ToolStat = { count: number; p50: number; p95: number };
 
 export function Stats() {
   const [stats, setStats] = useState<Record<string, ToolStat>>({});
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
@@ -16,12 +17,14 @@ export function Stats() {
         .catch((err) => {
           if (err instanceof ApiError && err.status === 401) return navigate("/login");
           setError("Couldn't load stats right now.");
-        });
+        })
+        .finally(() => setLoading(false));
     fetchStats();
     const id = setInterval(fetchStats, 10_000);
     return () => clearInterval(id);
   }, [navigate]);
 
+  if (loading) return <p className="muted">Loading…</p>;
   if (error) return <p className="muted">{error}</p>;
   const tools = Object.entries(stats);
   if (tools.length === 0) return <p className="muted">No tool calls yet this session.</p>;

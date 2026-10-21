@@ -33,7 +33,7 @@ async function copyEnvFiles(source: string, dest: string) {
 
 export type Ticket = { id: string; title: string; description: string };
 export type JobResult =
-  | { status: "done"; docPath: string; prUrl?: string; sessionId?: string; resumeCmd?: string }
+  | { status: "done"; docPath: string; prUrl?: string; docUrl?: string; sessionId?: string; resumeCmd?: string }
   | { status: "blocked"; question: string }
   | { status: "timeout" };
 
@@ -180,11 +180,13 @@ export async function runJob(resolved: ResolvedRepo, ticket: Ticket, jobId: stri
 
     await exec("git", ["add", `${docName}.md`], { cwd: resolved.repoPath });
     await exec("git", ["commit", "-m", `plan: ${ticket.id}`], { cwd: resolved.repoPath });
+    const docUrl = await pushPlanDoc(resolved.repoPath, docName);
     const sessionId = await latestSessionId(dataDir, resolved.repoPath);
     if (tabId) closeGhosttyTab(tabId).catch(() => {});
     return {
       status: "done",
       docPath,
+      docUrl,
       sessionId,
       resumeCmd: sessionId ? `cd ${resolved.repoPath} && XDG_DATA_HOME="${dataDir}" opencode -s ${sessionId}` : undefined,
     };
@@ -257,13 +259,15 @@ export async function resumeJob(jobDir: string, answer: string, headless = false
   if (result.sentinel === "blocked") return { status: "blocked", question: result.question };
   if (result.sentinel === "timeout") return { status: "timeout" };
 
-  const prUrl = state.isPlan
-    ? await (async () => {
-        await exec("git", ["add", path.relative(state.repoPath, state.docPath)], { cwd: state.repoPath });
-        await exec("git", ["commit", "-m", `plan: ${state.ticketId}`], { cwd: state.repoPath }).catch(() => {});
-        return undefined;
-      })()
-    : await finish(state.worktreeDir!, state.branch!, { id: state.ticketId, title: state.ticketTitle, description: "" }, state.docPath);
+  let prUrl: string | undefined;
+  let docUrl: string | undefined;
+  if (state.isPlan) {
+    await exec("git", ["add", path.relative(state.repoPath, state.docPath)], { cwd: state.repoPath });
+    await exec("git", ["commit", "-m", `plan: ${state.ticketId}`], { cwd: state.repoPath }).catch(() => {});
+    docUrl = await pushPlanDoc(state.repoPath, path.basename(state.docPath, ".md"));
+  } else {
+    prUrl = await finish(state.worktreeDir!, state.branch!, { id: state.ticketId, title: state.ticketTitle, description: "" }, state.docPath);
+  }
 
   const newSessionId = await latestSessionId(state.dataDir, cwd);
   if (tabId) closeGhosttyTab(tabId).catch(() => {});
@@ -271,6 +275,7 @@ export async function resumeJob(jobDir: string, answer: string, headless = false
     status: "done",
     docPath: state.docPath,
     prUrl,
+    docUrl,
     sessionId: newSessionId,
     resumeCmd: newSessionId ? `cd ${cwd} && XDG_DATA_HOME="${state.dataDir}" opencode -s ${newSessionId}` : undefined,
   };
@@ -323,6 +328,24 @@ export async function implementJob(researchState: JobState, jobId: string, headl
     sessionId,
     resumeCmd: sessionId ? `cd ${worktreeDir} && XDG_DATA_HOME="${dataDir}" opencode -s ${sessionId}` : undefined,
   };
+}
+
+// pre-demo UX audit: a plan doc previously only ever got committed to the local plans repo,
+// never pushed — invisible to anyone but whoever's physically at this Mac. Pushes to whatever
+// remote/branch is already configured and returns a GitHub blob URL; returns undefined (not a
+// throw) if the repo has no remote yet, so this degrades to today's local-only behavior instead
+// of failing the whole job over a one-time setup step the user hasn't run.
+async function pushPlanDoc(repoPath: string, docName: string): Promise<string | undefined> {
+  try {
+    await exec("git", ["push"], { cwd: repoPath }).catch(() =>
+      exec("git", ["push", "-u", "origin", "HEAD"], { cwd: repoPath }),
+    );
+    const { stdout: nameWithOwner } = await exec("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { cwd: repoPath });
+    const { stdout: branch } = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoPath });
+    return `https://github.com/${nameWithOwner.trim()}/blob/${branch.trim()}/${docName}.md`;
+  } catch {
+    return undefined;
+  }
 }
 
 async function finish(worktreeDir: string, branch: string, ticket: Ticket, docPath: string): Promise<string> {

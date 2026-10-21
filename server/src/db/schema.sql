@@ -50,3 +50,12 @@ create table if not exists jobs (
 -- forget call that can go unanswered or get spam-blocked, confirmed happening this session) —
 -- only set when genuinely spoken during a live call, so nothing can be silently lost.
 alter table jobs add column if not exists delivered_at timestamptz;
+
+-- pre-demo UX audit: this data already existed upstream (Linear's issue.url, the runner's plan
+-- commit) but was never persisted past the moment it was used once — a finished job had nothing
+-- to show for itself beyond a generic "done". ticket_url links back to the actual Linear issue;
+-- doc_url is the pushed GitHub blob URL for a plan/research doc (the plan-only equivalent of
+-- pr_url, kept as its own column since a job is never both).
+alter table jobs add column if not exists ticket_url text;
+alter table jobs add column if not exists doc_url text;
+alter table jobs add column if not exists description text;

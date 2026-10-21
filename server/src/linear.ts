@@ -8,13 +8,14 @@ export type Issue = {
   priority: number; // 0 none, 1 urgent, 2 high, 3 medium, 4 low
   dueDate: string | null;
   state: { id: string; name: string; type: string } | null;
+  url: string;
 };
 
 const QUERY = `
   query {
     viewer {
       assignedIssues(filter: { state: { type: { nin: ["completed", "canceled"] } } }) {
-        nodes { id identifier title description priority dueDate state { id name type } }
+        nodes { id identifier title description priority dueDate state { id name type } url }
       }
     }
   }
@@ -87,7 +88,7 @@ export async function createIssue(title: string, description: string): Promise<I
     mutation($teamId: String!, $assigneeId: String!, $title: String!, $description: String!) {
       issueCreate(input: { teamId: $teamId, assigneeId: $assigneeId, title: $title, description: $description }) {
         success
-        issue { id identifier title description priority dueDate state { id name type } }
+        issue { id identifier title description priority dueDate state { id name type } url }
       }
     }
   `;

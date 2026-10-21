@@ -13,6 +13,7 @@ export function PushToggle() {
   const [supported, setSupported] = useState(false);
   const [subscribed, setSubscribed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     setSupported("serviceWorker" in navigator && "PushManager" in window);
@@ -27,10 +28,16 @@ export function PushToggle() {
   const subscribe = async () => {
     setBusy(true);
     try {
+      // check the server actually has push configured BEFORE asking the browser for a
+      // permission prompt — reproduced live: the user granted that prompt for a feature that
+      // was never going to work, with zero feedback explaining why nothing happened after.
+      const { key } = await fetch(`${API_URL}/api/push/vapid-public-key`, { credentials: "include" }).then((r) => r.json());
+      if (!key) {
+        setUnavailable(true);
+        return;
+      }
       const perm = await Notification.requestPermission();
       if (perm !== "granted") return;
-      const { key } = await fetch(`${API_URL}/api/push/vapid-public-key`, { credentials: "include" }).then((r) => r.json());
-      if (!key) return; // server has no VAPID keys configured
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
       await fetch(`${API_URL}/api/push/subscribe`, {
@@ -44,6 +51,8 @@ export function PushToggle() {
       setBusy(false);
     }
   };
+
+  if (unavailable) return <span className="muted">push not configured</span>;
 
   return (
     <button className="link-button" onClick={subscribe} disabled={busy || subscribed}>

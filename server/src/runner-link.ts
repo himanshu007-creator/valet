@@ -93,6 +93,7 @@ type RunnerStatusMsg = {
   jobId: string;
   status: "running" | "done" | "blocked" | "failed" | "timeout";
   docPath?: string;
+  docUrl?: string;
   prUrl?: string;
   question?: string;
   sessionId?: string;
@@ -106,6 +107,7 @@ const STATUS_COMMENT: Record<string, (msg: RunnerStatusMsg) => string> = {
   done: (msg) => {
     const lines = ["VALET finished this ticket."];
     if (msg.prUrl) lines.push(`Draft PR: ${msg.prUrl}`);
+    if (msg.docUrl) lines.push(`Notes: ${msg.docUrl}`);
     if (msg.resumeCmd) lines.push(`Resume the opencode session:\n\`\`\`\n${msg.resumeCmd}\n\`\`\``);
     return lines.join("\n\n");
   },
@@ -138,6 +140,7 @@ async function handleRunnerMessage(raw: string) {
     update jobs set
       status = ${msg.status},
       doc_path = coalesce(${msg.docPath ?? null}, doc_path),
+      doc_url = coalesce(${msg.docUrl ?? null}, doc_url),
       pr_url = coalesce(${msg.prUrl ?? null}, pr_url),
       question = coalesce(${msg.question ?? null}, question),
       started_at = coalesce(started_at, case when ${msg.status} = 'running' then now() else null end),
@@ -165,13 +168,21 @@ async function handleRunnerMessage(raw: string) {
     invalidateIssueCache(); // same stale-cache gap as toolOrder's guard — keep the next lookup honest
   }
 
-  const siblings = await sql`select status, title, pr_url, question from jobs where order_id = ${job.order_id}`;
+  const siblings = await sql`select status, title, pr_url, doc_url, question from jobs where order_id = ${job.order_id}`;
   if (siblings.some((j) => !TERMINAL.has(j.status))) return; // order still has jobs in flight
 
   const done = siblings.filter((j) => j.status === "done");
   const blocked = siblings.filter((j) => j.status === "blocked");
   const errored = siblings.filter((j) => j.status === "failed" || j.status === "timeout");
-  const parts = [`${done.length} of ${siblings.length} ready.`];
+  // reproduced live: this used to be just "N of M ready" — generic enough that a finished PR
+  // and a finished research doc read identically, and neither ever said what to go look at. Say
+  // what's actually there per job instead — this string drives both the push notification body
+  // and the phone callback's spoken update (same two call sites below).
+  const parts = done.map((j) => {
+    if (j.pr_url) return `${j.title} is ready — PR: ${j.pr_url}`;
+    if (j.doc_url) return `${j.title}'s notes are ready: ${j.doc_url}`;
+    return `${j.title} is ready.`;
+  });
   if (blocked.length > 0) parts.push(`${blocked.length} need a decision.`);
   if (errored.length > 0) parts.push(`${errored.length} hit an error.`);
   const summary = parts.join(" ");

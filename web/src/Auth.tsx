@@ -31,7 +31,12 @@ export function useAuth() {
       .catch(() => setState({ checked: true, username: null }));
   }, []);
 
-  const logout = () => api("/auth/logout").then(() => setState({ checked: true, username: null }));
+  // reproduced live: no body meant api()'s method:body?"POST":"GET" picked GET, but the server
+  // only registers POST /auth/logout — 404'd silently (no .catch), button looked dead.
+  const logout = () =>
+    api("/auth/logout", {})
+      .catch(() => {})
+      .then(() => setState({ checked: true, username: null }));
 
   return { ...state, setState, logout };
 }

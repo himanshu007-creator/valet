@@ -24,7 +24,7 @@ const queue: { jobId: string; ticket: Ticket }[] = [];
 
 function sendResult(ws: WebSocket, jobId: string, result: JobResult, errorMessage?: string) {
   if (result.status === "done") {
-    ws.send(JSON.stringify({ type: "status", jobId, status: "done", docPath: result.docPath, prUrl: result.prUrl, sessionId: result.sessionId, resumeCmd: result.resumeCmd }));
+    ws.send(JSON.stringify({ type: "status", jobId, status: "done", docPath: result.docPath, prUrl: result.prUrl, docUrl: result.docUrl, sessionId: result.sessionId, resumeCmd: result.resumeCmd }));
   } else if (result.status === "blocked") {
     ws.send(JSON.stringify({ type: "status", jobId, status: "blocked", question: result.question }));
   } else {

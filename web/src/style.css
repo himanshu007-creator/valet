@@ -96,12 +96,26 @@ section { margin-bottom: 32px; }
 .job-blocked .job-status { color: var(--warn); }
 .job-done .job-status { color: var(--accent); }
 
+a.job-ticket { color: inherit; text-decoration: none; }
+a.job-ticket:hover { text-decoration: underline; }
+
 .job-title { font-size: 15px; }
+
+.job-description {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
 
 .job-question, .job-answer {
   margin-top: 8px;
   font-size: 13px;
   color: var(--muted);
+}
+
+.job-links {
+  display: flex;
+  gap: 16px;
 }
 
 .job-pr {

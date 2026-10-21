@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, Navigate, useSearchParams } from "react-router-dom";
+import { Routes, Route, Navigate, useSearchParams, useNavigate } from "react-router-dom";
 import { AnimatePresence } from "motion/react";
 import DeskMode from "./DeskMode.tsx";
-import { useAuth, LoginForm } from "./Auth.tsx";
+import { useAuth, LoginForm, api, ApiError } from "./Auth.tsx";
 import { JobCard, type Job } from "./JobCard.tsx";
 import { History } from "./History.tsx";
 import { Stats } from "./Stats.tsx";
@@ -10,7 +10,6 @@ import { useLenis } from "./useLenis.ts";
 import { PushToggle } from "./PushToggle.tsx";
 import { Landing } from "./Landing.tsx";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
 
 type Status = { order: { id: string; createdAt: string; jobs: Job[] } | null; runnerOnline?: boolean };
@@ -46,6 +45,7 @@ function Dashboard({ username, onLogout }: { username: string; onLogout: () => v
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = (searchParams.get("tab") as Tab) ?? "today";
   const highlightJob = searchParams.get("job");
+  const navigate = useNavigate();
 
   const setTab = (t: Tab) => {
     const next = new URLSearchParams(searchParams);
@@ -58,15 +58,19 @@ function Dashboard({ username, onLogout }: { username: string; onLogout: () => v
   useLenis();
 
   useEffect(() => {
+    // reproduced live: a 401 here (e.g. a server redeploy wiping the in-memory session) was
+    // silently swallowed — "Today" just went stale/blank forever instead of bouncing to login
+    // the way History/Stats already do.
     const fetchPriorities = () =>
-      fetch(`${API_URL}/api/priorities`, { credentials: "include" })
-        .then((r) => r.json())
+      api("/api/priorities")
         .then((d) => setPriorities(d.summary))
-        .catch(() => {});
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 401) navigate("/login");
+        });
     fetchPriorities();
     const id = setInterval(fetchPriorities, 60_000); // matches the server's cache TTL
     return () => clearInterval(id);
-  }, []);
+  }, [navigate]);
 
   // a push notification's "job" deep link: jump straight to the ticket it's about.
   useEffect(() => {

@@ -15,7 +15,7 @@ export async function getStatus() {
   const runnerOnline = runnerConnected();
   if (!order) return { type: "status", order: null, runnerOnline };
   const jobs = await sql`
-    select id, ticket_id, title, status, pr_url, question, answer
+    select id, ticket_id, title, description, status, pr_url, doc_url, ticket_url, question, answer
     from jobs where order_id = ${order.id} order by ticket_id
   `;
   return { type: "status", order: { id: order.id, createdAt: order.created_at, jobs }, runnerOnline };
@@ -24,7 +24,7 @@ export async function getStatus() {
 export async function getOrderHistory() {
   const orders = await sql`select id, tickets, created_at from orders order by created_at desc limit 50`;
   const jobs = await sql`
-    select id, order_id, ticket_id, title, status, pr_url, question, answer, started_at, finished_at
+    select id, order_id, ticket_id, title, description, status, pr_url, doc_url, ticket_url, question, answer, started_at, finished_at
     from jobs order by ticket_id
   `;
   return orders.map((order) => ({
