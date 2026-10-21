@@ -109,18 +109,49 @@ export async function toolGetStatusAll(): Promise<string> {
   // same transient-reconnect tolerance as the action-gating checks — this IS the answer to
   // "is my mac connected," so it needs to be at least as resilient as those, not less.
   const online = await runnerConnectedWithRetry();
-  const jobs = await sql`select status from jobs where status in ('queued', 'running', 'blocked')`;
+  const jobs = await sql`select status, title, question from jobs where status in ('queued', 'running', 'blocked')`;
   const parts: string[] = [online ? "The runner on your Mac is connected." : "The runner on your Mac isn't connected right now."];
   if (jobs.length === 0) {
     parts.push("Nothing running right now.");
   } else {
     const running = jobs.filter((j) => j.status === "queued" || j.status === "running").length;
-    const blocked = jobs.filter((j) => j.status === "blocked").length;
+    const blocked = jobs.filter((j) => j.status === "blocked");
     const bits: string[] = [];
     if (running > 0) bits.push(`${running} running`);
-    if (blocked > 0) bits.push(`${blocked} waiting on a decision from you`);
+    if (blocked.length > 0) bits.push(`${blocked.length} waiting on a decision from you`);
     parts.push(bits.join(", ") + ".");
+    // a blocked count alone forces the caller to ask "what's the question" as a second
+    // round-trip — just say it, same spell-out-vs-summarize rule as undelivered terminal jobs.
+    const SPELL_OUT = 3;
+    if (blocked.length > 0 && blocked.length <= SPELL_OUT) {
+      for (const j of blocked) if (j.question) parts.push(`On ${j.title}: ${j.question}`);
+    }
   }
+
+  // a caller who phones in fresh — not via a callback — must still hear about anything that
+  // finished or failed while they were away, no matter how many orders ago. Not scoped to the
+  // latest order: every undelivered terminal job, across all of them.
+  const undelivered = await sql`
+    select id, ticket_id, title, status, pr_url from jobs
+    where status in ('done', 'failed', 'timeout') and delivered_at is null
+    order by finished_at asc
+  `;
+  if (undelivered.length > 0) {
+    const done = undelivered.filter((j) => j.status === "done");
+    const errored = undelivered.filter((j) => j.status !== "done");
+    const SPELL_OUT = 3; // beyond this, a flat list gets unwieldy to listen to — summarize and offer detail
+    if (undelivered.length <= SPELL_OUT) {
+      for (const j of done) parts.push(`${j.title} is done${j.pr_url ? ", PR's ready" : ""}.`);
+      for (const j of errored) parts.push(`${j.title} hit an error.`);
+    } else {
+      const bits: string[] = [];
+      if (done.length > 0) bits.push(`${done.length} finished`);
+      if (errored.length > 0) bits.push(`${errored.length} hit an error`);
+      parts.push(`Since we last spoke, ${bits.join(" and ")}. Want me to go through them, or just the highlights?`);
+    }
+    await sql`update jobs set delivered_at = now() where id in ${sql(undelivered.map((j) => j.id))}`;
+  }
+
   return parts.join(" ");
 }
 

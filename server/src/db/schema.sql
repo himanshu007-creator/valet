@@ -40,3 +40,13 @@ create table if not exists jobs (
   started_at timestamptz,
   finished_at timestamptz
 );
+
+-- reproduced live: a caller who phones in fresh (not via a callback) could hear "nothing
+-- running" and never learn that N tickets finished or failed while they were away — the
+-- overview only ever looked at active (queued/running/blocked) jobs. delivered_at tracks
+-- whether a terminal outcome has actually been spoken to the caller at least once; the
+-- overview surfaces anything still null regardless of how long ago it finished, then marks it
+-- delivered. Deliberately NOT set from the outbound-callback trigger path (that's a fire-and-
+-- forget call that can go unanswered or get spam-blocked, confirmed happening this session) —
+-- only set when genuinely spoken during a live call, so nothing can be silently lost.
+alter table jobs add column if not exists delivered_at timestamptz;

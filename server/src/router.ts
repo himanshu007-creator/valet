@@ -10,6 +10,51 @@ function log(question: string, answer: string, confidence: number) {
   console.log(`[jev] ${question} -> ${answer} (confidence ${confidence.toFixed(2)})`);
 }
 
+function levenshtein(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+const STOP_WORDS = new Set([
+  "the", "a", "an", "is", "there", "anything", "about", "on", "to", "for", "that", "this",
+  "task", "ticket", "related", "something", "with", "and", "of", "in", "it", "do", "we",
+  "have", "any", "update", "please", "can", "you",
+]);
+
+function significantWords(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
+}
+
+// Jev weighs *meaning* heavily — reproduced live: "Fitbit" (a well-known consumer brand) read
+// as unrelated to "featbit-js-client-sdk" (an internal SDK), even though the words are one
+// letter apart. That's a real structural gap for garbled proper nouns/project names, which is
+// exactly what voice ASR mangles most. This literal fallback only fires when Jev didn't already
+// find a confident match — it's a safety net for spelling noise, not a replacement for Jev's
+// actual language understanding.
+function fuzzyWordMatch(request: string, candidates: { id: string; title: string }[]): { id: string; distance: number } | null {
+  const queryWords = significantWords(request);
+  if (queryWords.length === 0) return null;
+  let best: { id: string; distance: number } | null = null;
+  for (const c of candidates) {
+    for (const tw of significantWords(c.title)) {
+      for (const qw of queryWords) {
+        const maxLen = Math.max(qw.length, tw.length);
+        const dist = levenshtein(qw, tw);
+        const threshold = Math.min(3, Math.ceil(maxLen * 0.3)); // ~30% of the longer word, capped at 3 edits
+        if (dist <= threshold && (!best || dist < best.distance)) best = { id: c.id, distance: dist };
+      }
+    }
+  }
+  return best;
+}
+
 export type TaskIntent = "create" | "execute" | "probe" | "delete" | "overview";
 
 // Each description doubles as a few-shot example set — concrete phrasings score noticeably
@@ -56,6 +101,15 @@ export async function classifyAndMatch(
     log("ticket", ticketAnswer.choice, ticketAnswer.confidence);
     ticketId = ticketAnswer.choice === "none" ? null : ticketAnswer.choice;
     ticketConfidence = ticketAnswer.confidence;
+
+    if (ticketId === null) {
+      const fuzzy = fuzzyWordMatch(request, candidates);
+      if (fuzzy) {
+        console.log(`[fuzzy] ticket -> ${fuzzy.id} (edit distance ${fuzzy.distance})`);
+        ticketId = fuzzy.id;
+        ticketConfidence = BAND.LOW; // actionable but not full-confidence — a spelling-level guess, not a semantic one
+      }
+    }
   }
 
   return { intent: intentAnswer.choice as TaskIntent, intentConfidence: intentAnswer.confidence, ticketId, ticketConfidence };
@@ -80,5 +134,13 @@ export async function matchTicket(
   });
   const answer = res.answers.ticket;
   log("ticket", answer.choice, answer.confidence);
-  return { id: answer.choice === "none" ? null : answer.choice, confidence: answer.confidence };
+  if (answer.choice === "none") {
+    const fuzzy = fuzzyWordMatch(request, candidates);
+    if (fuzzy) {
+      console.log(`[fuzzy] ticket -> ${fuzzy.id} (edit distance ${fuzzy.distance})`);
+      return { id: fuzzy.id, confidence: BAND.LOW };
+    }
+    return { id: null, confidence: answer.confidence };
+  }
+  return { id: answer.choice, confidence: answer.confidence };
 }

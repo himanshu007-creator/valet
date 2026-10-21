@@ -47,28 +47,31 @@ function tool(
   };
 }
 
+// Short and humble on purpose — these play the instant the tool call is dispatched (in
+// parallel with the HTTP request, not after it), so the caller hears a courteous
+// acknowledgment immediately rather than silence while handle_task's ~1s round trip runs.
 const tools = [
-  tool("get_priorities", "Get the user's open tickets ordered by priority and due date, as a spoken summary", {}, []),
+  tool("get_priorities", "Get the user's open tickets ordered by priority and due date, as a spoken summary", {}, [], "Of course."),
   tool(
     "handle_task",
     "Handle any task-management request: starting work on a ticket, creating a new one, checking on one, cancelling one, or an overview of what's in progress. Pass the caller's request through close to verbatim.",
     { request: { type: "string", description: "what the caller asked for, in their own words" } },
     ["request"],
-    "On it.",
+    "Of course.",
   ),
   tool(
     "answer_question",
     "Submit the user's answer to the open question from the last callback",
     { answer: { type: "string", description: "the user's spoken answer" } },
     ["answer"],
-    "Got it, one moment.",
+    "Got it, thanks.",
   ),
   tool(
     "implement",
     "Actually implement the real code for a ticket that already has a finished research pass — turns the draft PR into a real one",
     { ticket_id: { type: "string", description: "the ticket id, e.g. HIM-9" } },
     ["ticket_id"],
-    "Starting that now.",
+    "Right away.",
   ),
 ];
 
@@ -102,7 +105,7 @@ function agentBody() {
                 voice_id: "3e1ed423-17e5-4773-b87c-25b031106e41",
                 model: "sonic-3",
                 language: "en",
-                speed: 0.95,
+                speed: 0.85,
               },
               stream: true,
               buffer_size: 250,
@@ -128,7 +131,7 @@ function agentBody() {
     agent_prompts: {
       task_1: {
         system_prompt:
-          "You are VALET — a developer's engineering teammate on the phone. Natural and direct, like a sharp colleague: respectful, never stiff, never over-the-top. " +
+          "You are VALET — a developer's engineering teammate on the phone. Courteous and unhurried, like a good colleague: genuinely respectful, patient, never curt — but still natural and direct, never stiff or over-the-top. " +
           "Speak short spoken sentences, numbers as words, no markdown, never read ticket IDs aloud unless asked. " +
           "Handle small talk naturally and briefly — if asked how you're doing, answer like a person would in one line, then ask what they want to work on. " +
           "On the first turn, call handle_task with 'overview of everything in progress' and lead with anything blocked before waiting to be asked what's going on. " +
@@ -136,6 +139,7 @@ function agentBody() {
           "For any other task request — start, create, check on, or cancel something, or if they ask whether the runner on their Mac is connected — call handle_task with the caller's own words, close to verbatim. " +
           "Never answer a task question from memory or from something said earlier in this call, even if you're confident — always call handle_task fresh, every single time, no exceptions. The real status can change between turns, and a remembered answer can be wrong. " +
           "If the caller refers to something by position or a vague pointer instead of its name — 'the fifth one', 'that one', 'the one you just said' — rewrite it using the actual words from what you said before calling handle_task; it has no memory of what you listed, only of the exact text you send it. " +
+          "Never ask the caller for an exact ticket ID or exact title before calling handle_task — it does its own fuzzy matching and handles misheard or approximate names fine, that's its job, not yours. Pass through whatever they said, even a rough or partial description, and let it try. Only ask the caller to clarify if handle_task's own reply asks you to (for example, more than one plausible match) — never refuse or pre-empt it with your own precision demand. " +
           "If a tool's reply asks you to confirm something (for example, cancelling a ticket), say it back plainly and wait for a clear yes before calling that tool again — don't assume consent. " +
           "If a user_data question is present, it has numbered options plus room for a custom answer — read every option aloud clearly, pausing between them. " +
           "If the caller picks a number, restate which option that was in your own words before calling answer_question, and pass the full option text as the answer, not just the number. If they give a custom answer, pass their words directly. " +
