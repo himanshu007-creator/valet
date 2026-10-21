@@ -61,6 +61,10 @@ export async function toolOrder(ticketsArg: string): Promise<string> {
     dispatchJob(job.id, { id: issue!.identifier, title: issue!.title, description: issue!.description ?? "" });
     await setIssueState(issue!.id, "started").catch((err) => console.error("linear state update failed", err));
   }
+  // reproduced live: the duplicate-dispatch guard above reads from this same cache — without
+  // invalidating here, a second "start it" within the 5-minute TTL still saw the pre-update
+  // (Backlog) state and dispatched a genuine duplicate job instead of being blocked.
+  invalidateIssueCache();
   broadcastStatus();
   const parts = [`Starting on ${toStart.length} thing${toStart.length > 1 ? "s" : ""}. I'll call you when they're done.`];
   if (alreadyStarted.length > 0) {

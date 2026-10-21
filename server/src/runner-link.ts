@@ -3,7 +3,7 @@ import { sql } from "./db.ts";
 import { triggerCallback } from "./bolna.ts";
 import { env } from "./env.ts";
 import { isCallActive } from "./call-guard.ts";
-import { getIssueById } from "./cache.ts";
+import { getIssueById, invalidateIssueCache } from "./cache.ts";
 import { postComment, setIssueState } from "./linear.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
 import { notifyPush } from "./push.ts";
@@ -158,6 +158,7 @@ async function handleRunnerMessage(raw: string) {
     // paused on a decision, not something a second "start it" should treat as fresh work.
     if (msg.status === "done") await setIssueState(issue.id, "completed").catch((err) => console.error("linear state update failed", err));
     else if (msg.status === "failed" || msg.status === "timeout") await setIssueState(issue.id, "unstarted").catch((err) => console.error("linear state update failed", err));
+    invalidateIssueCache(); // same stale-cache gap as toolOrder's guard — keep the next lookup honest
   }
 
   const siblings = await sql`select status, title, pr_url, question from jobs where order_id = ${job.order_id}`;
