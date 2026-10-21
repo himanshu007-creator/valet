@@ -133,7 +133,12 @@ async function pollForSentinel(logPath: string, docPath: string, deadline: numbe
 async function launch(jobDir: string, cwd: string, dataDir: string, logPath: string, tabTitle: string, messagePath: string, opencodeExtraArgs: string, append: boolean, headless: boolean): Promise<string | undefined> {
   const scriptPath = path.join(jobDir, "run.sh");
   const teeArgs = append ? "-a" : "";
-  const script = `#!/bin/bash\nprintf '\\033]0;${tabTitle}\\007'\ncd "${cwd}"\nXDG_DATA_HOME="${dataDir}" opencode run ${opencodeExtraArgs}--auto "$(cat "${messagePath}")" 2>&1 | tee ${teeArgs} "${logPath}"\n`;
+  // Reproduced live: "opencode: command not found". Ghostty's `command` config property execs
+  // this script directly as the surface's process — not through a login/interactive shell, so
+  // .zshrc (where Homebrew's PATH normally comes from) never runs. Bake the runner daemon's own
+  // PATH (correct, verified via the launchd plist) directly into the script so it's self-
+  // sufficient regardless of who launches it — Ghostty, headless spawn, or anything else.
+  const script = `#!/bin/bash\nexport PATH="${process.env.PATH}"\nprintf '\\033]0;${tabTitle}\\007'\ncd "${cwd}"\nXDG_DATA_HOME="${dataDir}" opencode run ${opencodeExtraArgs}--auto "$(cat "${messagePath}")" 2>&1 | tee ${teeArgs} "${logPath}"\n`;
   await writeFile(scriptPath, script);
   await chmod(scriptPath, 0o755);
   if (headless) {
