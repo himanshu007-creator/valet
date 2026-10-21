@@ -7,13 +7,14 @@ export type Issue = {
   description: string | null;
   priority: number; // 0 none, 1 urgent, 2 high, 3 medium, 4 low
   dueDate: string | null;
+  state: { id: string; name: string; type: string } | null;
 };
 
 const QUERY = `
   query {
     viewer {
       assignedIssues(filter: { state: { type: { nin: ["completed", "canceled"] } } }) {
-        nodes { id identifier title description priority dueDate }
+        nodes { id identifier title description priority dueDate state { id name type } }
       }
     }
   }
@@ -86,7 +87,7 @@ export async function createIssue(title: string, description: string): Promise<I
     mutation($teamId: String!, $assigneeId: String!, $title: String!, $description: String!) {
       issueCreate(input: { teamId: $teamId, assigneeId: $assigneeId, title: $title, description: $description }) {
         success
-        issue { id identifier title description priority dueDate }
+        issue { id identifier title description priority dueDate state { id name type } }
       }
     }
   `;
@@ -118,6 +119,62 @@ export async function archiveIssue(issueId: string): Promise<void> {
   const json = await res.json();
   if (!res.ok || json.errors || !json.data.issueArchive.success) {
     throw new Error(`linear issueArchive failed: ${JSON.stringify(json.errors ?? json)}`);
+  }
+}
+
+// Linear's workflow states are per-team and named freely ("In Progress", "Todo", etc.) but
+// each has a stable `type`: unstarted | started | completed | canceled | triage. Caching by
+// type, not name, so this doesn't break if the team's states ever get renamed.
+let stateIdsByType: Record<string, string> | null = null;
+
+// a team can have more than one state of the same type (confirmed: "In Progress" and "In
+// Review" both type "started") — prefer the one actually named this, falling back to
+// whichever comes first, rather than picking an arbitrary one.
+const PREFERRED_NAME: Partial<Record<string, string>> = { started: "in progress", unstarted: "todo", completed: "done" };
+
+async function getStateId(type: "started" | "unstarted" | "completed"): Promise<string | null> {
+  if (!stateIdsByType) {
+    const teamId = await getDefaultTeamId();
+    const res = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: { Authorization: env.linearApiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query($teamId: String!) { team(id: $teamId) { states { nodes { id name type } } } }`,
+        variables: { teamId },
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok || json.errors) throw new Error(`linear states fetch failed: ${JSON.stringify(json.errors ?? json)}`);
+    stateIdsByType = {};
+    const byType: Record<string, { id: string; name: string }[]> = {};
+    for (const s of json.data.team.states.nodes) (byType[s.type] ??= []).push(s);
+    for (const [t, states] of Object.entries(byType)) {
+      const preferred = states.find((s) => s.name.toLowerCase() === PREFERRED_NAME[t]);
+      stateIdsByType[t] = (preferred ?? states[0]).id;
+    }
+  }
+  return stateIdsByType[type] ?? null;
+}
+
+// Linear as the actual source of truth for "is this ticket being worked on" — a caller asking
+// to start something already in a "started"-type state gets turned away before a duplicate job
+// ever gets dispatched, not just an in-memory/DB check that only this process knows about.
+export async function setIssueState(issueId: string, type: "started" | "unstarted" | "completed"): Promise<void> {
+  const stateId = await getStateId(type);
+  if (!stateId) return; // team has no state of this type configured — nothing sensible to set, skip rather than error
+  const mutation = `
+    mutation($issueId: String!, $stateId: String!) {
+      issueUpdate(id: $issueId, input: { stateId: $stateId }) { success }
+    }
+  `;
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: { Authorization: env.linearApiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ query: mutation, variables: { issueId, stateId } }),
+  });
+  const json = await res.json();
+  if (!res.ok || json.errors || !json.data.issueUpdate.success) {
+    throw new Error(`linear issueUpdate(state) failed: ${JSON.stringify(json.errors ?? json)}`);
   }
 }
 

@@ -2,7 +2,7 @@ import { getPrioritiesSummary, getIssueById, getCachedIssues, invalidateIssueCac
 import { sql } from "./db.ts";
 import { runnerConnected, dispatchJob, dispatchAnswer, dispatchImplement } from "./runner-link.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
-import { createIssue, archiveIssue } from "./linear.ts";
+import { createIssue, archiveIssue, setIssueState } from "./linear.ts";
 import { classifyAndMatch, matchTicket, BAND } from "./router.ts";
 import { env } from "./env.ts";
 
@@ -40,17 +40,33 @@ export async function toolOrder(ticketsArg: string): Promise<string> {
   const found = issues.filter((i) => i !== undefined);
   if (found.length === 0) return "I couldn't find those tickets on the board.";
 
-  const [order] = await sql`insert into orders (tickets) values (${found.map((i) => i!.identifier)}) returning id`;
-  for (const issue of found) {
+  // Linear is the source of truth for "already being worked on" — a ticket Linear already
+  // shows in a started-type state (In Progress or similar) doesn't get a second, duplicate job
+  // dispatched for it just because another call/request asked to start it again.
+  const alreadyStarted = found.filter((i) => i!.state?.type === "started");
+  const toStart = found.filter((i) => i!.state?.type !== "started");
+
+  if (toStart.length === 0) {
+    const names = alreadyStarted.map((i) => i!.identifier).join(", ");
+    return `${names} ${alreadyStarted.length > 1 ? "are" : "is"} already being worked on — I'll let you know when done, no need to start it again.`;
+  }
+
+  const [order] = await sql`insert into orders (tickets) values (${toStart.map((i) => i!.identifier)}) returning id`;
+  for (const issue of toStart) {
     const [job] = await sql`
       insert into jobs (order_id, ticket_id, title, status)
       values (${order.id}, ${issue!.identifier}, ${issue!.title}, 'queued')
       returning id
     `;
     dispatchJob(job.id, { id: issue!.identifier, title: issue!.title, description: issue!.description ?? "" });
+    await setIssueState(issue!.id, "started").catch((err) => console.error("linear state update failed", err));
   }
   broadcastStatus();
-  return `Starting on ${found.length} thing${found.length > 1 ? "s" : ""}. I'll call you when they're done.`;
+  const parts = [`Starting on ${toStart.length} thing${toStart.length > 1 ? "s" : ""}. I'll call you when they're done.`];
+  if (alreadyStarted.length > 0) {
+    parts.push(`${alreadyStarted.map((i) => i!.identifier).join(", ")} ${alreadyStarted.length > 1 ? "were" : "was"} already in progress, so I skipped ${alreadyStarted.length > 1 ? "those" : "that"}.`);
+  }
+  return parts.join(" ");
 }
 
 // full phrases, not words to fill into a fixed "X is ___" template — "X is hit an error" is

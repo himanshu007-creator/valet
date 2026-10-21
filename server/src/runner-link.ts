@@ -4,7 +4,7 @@ import { triggerCallback } from "./bolna.ts";
 import { env } from "./env.ts";
 import { isCallActive } from "./call-guard.ts";
 import { getIssueById } from "./cache.ts";
-import { postComment } from "./linear.ts";
+import { postComment, setIssueState } from "./linear.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
 import { notifyPush } from "./push.ts";
 
@@ -125,6 +125,13 @@ async function handleRunnerMessage(raw: string) {
   if (issue) {
     const body = STATUS_COMMENT[msg.status]?.(msg);
     if (body) await postComment(issue.id, body).catch((err) => console.error("linear comment failed", err));
+    // Linear as the source of truth for state: done moves it to a completed-type column;
+    // failed/timeout move it back to unstarted (not stuck "in progress" forever, and ready to
+    // retry) — the duplicate-dispatch guard in toolOrder checks exactly this field. blocked
+    // deliberately leaves it in the started-type state — it's still actively in flight, just
+    // paused on a decision, not something a second "start it" should treat as fresh work.
+    if (msg.status === "done") await setIssueState(issue.id, "completed").catch((err) => console.error("linear state update failed", err));
+    else if (msg.status === "failed" || msg.status === "timeout") await setIssueState(issue.id, "unstarted").catch((err) => console.error("linear state update failed", err));
   }
 
   const siblings = await sql`select status, title, pr_url, question from jobs where order_id = ${job.order_id}`;
