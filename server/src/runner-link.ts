@@ -10,6 +10,32 @@ import { notifyPush } from "./push.ts";
 
 let runnerSocket: WebSocket | null = null;
 
+// reproduced live: a job hit VALET_BLOCKED while the caller was genuinely still on an active
+// call — the one-call-at-a-time guard correctly skipped a second, overlapping call, but then
+// nothing ever re-attempted delivery once that call actually ended. Call this when a call ends;
+// it checks for anything still waiting (undelivered terminal jobs, or any blocked job — blocked
+// never gets a delivered_at, so it's always "still waiting" until answered) and places a fresh
+// callback if so. That callback's first turn calls handle_task's overview like any other call,
+// which is what actually marks things delivered — never optimistically marked here, so a call
+// that itself goes unanswered just leaves the news to be retried, not silently lost.
+let lastCatchupAttempt = 0;
+const CATCHUP_DEBOUNCE_MS = 2 * 60 * 1000;
+
+export async function catchUpIfNeeded() {
+  if (!env.allowedCallerNumber || isCallActive()) return;
+  if (Date.now() - lastCatchupAttempt < CATCHUP_DEBOUNCE_MS) return;
+
+  const [undelivered] = await sql`select count(*)::int as n from jobs where status in ('done', 'failed', 'timeout') and delivered_at is null`;
+  const [blocked] = await sql`select count(*)::int as n from jobs where status = 'blocked'`;
+  if (undelivered.n === 0 && blocked.n === 0) return;
+
+  lastCatchupAttempt = Date.now();
+  console.log(`catching up: ${undelivered.n} undelivered, ${blocked.n} blocked`);
+  await triggerCallback(env.allowedCallerNumber, "catching up on what happened while you were on a call").catch((err) =>
+    console.error("catch-up callback failed", err),
+  );
+}
+
 // Render's proxy (and most reverse proxies) idle-time out a WebSocket with no data flowing —
 // during a real phone call there can be long gaps with nothing to say to the runner, so without
 // this the connection silently drops and reconnects every ~30-60s. A tool call landing in that

@@ -145,7 +145,6 @@ function agentBody() {
           "If the caller picks a number, restate which option that was in your own words before calling answer_question, and pass the full option text as the answer, not just the number. If they give a custom answer, pass their words directly. " +
           "If the caller wants a ticket actually built, not just researched — 'start it for real', 'ship the auth one' — call implement with that ticket's id. " +
           "Talk like: 'Sure thing — starting on that now.' 'Let me check.' 'Two things need a decision from you.' Not: 'I would be absolutely delighted to assist you with that!' " +
-          "If this call has context data with a summary (meaning VALET placed this call, not the other way around), open with that summary plainly instead of the generic greeting, then ask if there's anything else. " +
           "The conversation is complete, and you should say a brief goodbye and stop, when: the caller says something like 'bye', 'goodbye', 'thanks', 'that's all', or 'nothing else', and their goal for this call seems achieved. " +
           "If they keep talking or ask for something new after your goodbye, treat it like a fresh request, not an ending. Never end mid-task or before a direct question is answered.",
       },

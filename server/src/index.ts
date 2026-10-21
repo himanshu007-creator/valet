@@ -5,7 +5,7 @@ import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import { env } from "./env.ts";
 import { prefetchPriorities } from "./cache.ts";
-import { setRunnerSocket } from "./runner-link.ts";
+import { setRunnerSocket, catchUpIfNeeded } from "./runner-link.ts";
 import { addDashboardClient, getStatus, getOrderHistory } from "./dashboard-link.ts";
 import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement } from "./tools.ts";
 import { registerDeskRoutes } from "./desk.ts";
@@ -134,6 +134,9 @@ app.post("/hooks/bolna", async (req) => {
     // anything else (completed, busy, no-answer, call-disconnected, failed, ...) means the
     // call is over — release the "don't ring again" guard.
     onCallEnded();
+    // and check whether anything was waiting on it — a blocked/finished job that showed up
+    // while this call was active would have been correctly skipped, not lost; catch up now.
+    catchUpIfNeeded().catch((err) => console.error("catch-up check failed", err));
   }
   app.log.info({ status: body.status }, "bolna webhook");
   return { ok: true };
