@@ -207,6 +207,12 @@ export async function toolHandleTask(request: string): Promise<string> {
 
   switch (intent) {
     case "overview":
+      // a confident ticket match alongside "overview" intent means Jev was sure *which*
+      // ticket the caller meant but unsure of the verb — reproduced live: "is there
+      // something related to X" landed as overview, which has no ticket-search path at all,
+      // so a real match sat unused and the caller got a generic "nothing in progress" instead
+      // of an actual answer about X. Prefer the specific answer when one was actually found.
+      if (id && confidence >= BAND.LOW) return toolProbeTask(id);
       return toolGetStatusAll();
 
     case "create": {

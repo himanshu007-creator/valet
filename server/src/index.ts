@@ -10,7 +10,7 @@ import { addDashboardClient, getStatus, getOrderHistory } from "./dashboard-link
 import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement } from "./tools.ts";
 import { registerDeskRoutes } from "./desk.ts";
 import { registerAuthRoutes, requireAuth } from "./auth.ts";
-import { onCallStarted, isCallerAllowed } from "./call-guard.ts";
+import { onCallStarted, isCallerAllowed, onCallActiveStatus, onCallEnded } from "./call-guard.ts";
 import { timed, getStats } from "./stats.ts";
 import { wsRunnerRateLimit, recordWsRunnerFailure } from "./rate-limit.ts";
 import { sql } from "./db.ts";
@@ -128,7 +128,12 @@ app.post("/hooks/bolna", async (req) => {
   const body = req.body as { status?: string; user_number?: string };
   if (body.status && CALL_STARTED_STATUSES.has(body.status)) {
     onCallStarted(body.user_number);
+    onCallActiveStatus();
     prefetchPriorities();
+  } else if (body.status) {
+    // anything else (completed, busy, no-answer, call-disconnected, failed, ...) means the
+    // call is over — release the "don't ring again" guard.
+    onCallEnded();
   }
   app.log.info({ status: body.status }, "bolna webhook");
   return { ok: true };

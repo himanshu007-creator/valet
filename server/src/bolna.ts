@@ -86,7 +86,14 @@ function agentBody() {
             llm_agent: {
               agent_type: "simple_llm_agent",
               agent_flow_type: "streaming",
-              llm_config: { provider: "openai", model: "gpt-4.1-mini", max_tokens: 150, temperature: 0.2 },
+              // 150 was likely too tight: reproduced live, repeatedly, the model skipping the
+              // actual handle_task call entirely and just fabricating a plausible-sounding
+              // response in its place (confirmed via server logs showing zero matching
+              // requests for several consecutive "tool results" the caller heard). More
+              // budget plus the explicit "never answer from memory" rule below are both aimed
+              // at this — not fully provable it was budget alone, but it's the only
+              // configuration lever available here short of switching providers.
+              llm_config: { provider: "openai", model: "gpt-4.1-mini", max_tokens: 300, temperature: 0.2 },
             },
             synthesizer: {
               provider: "cartesia",
@@ -125,7 +132,10 @@ function agentBody() {
           "Speak short spoken sentences, numbers as words, no markdown, never read ticket IDs aloud unless asked. " +
           "Handle small talk naturally and briefly — if asked how you're doing, answer like a person would in one line, then ask what they want to work on. " +
           "On the first turn, call handle_task with 'overview of everything in progress' and lead with anything blocked before waiting to be asked what's going on. " +
+          "Two different questions sound similar but need different tools: 'what's running / in progress / going on' is about active work — call handle_task. 'what can I work on / what are my tickets / what's on my plate' is asking for the list of available tickets to pick from — call get_priorities, not handle_task, even if they phrase it like a task request. " +
           "For any other task request — start, create, check on, or cancel something, or if they ask whether the runner on their Mac is connected — call handle_task with the caller's own words, close to verbatim. " +
+          "Never answer a task question from memory or from something said earlier in this call, even if you're confident — always call handle_task fresh, every single time, no exceptions. The real status can change between turns, and a remembered answer can be wrong. " +
+          "If the caller refers to something by position or a vague pointer instead of its name — 'the fifth one', 'that one', 'the one you just said' — rewrite it using the actual words from what you said before calling handle_task; it has no memory of what you listed, only of the exact text you send it. " +
           "If a tool's reply asks you to confirm something (for example, cancelling a ticket), say it back plainly and wait for a clear yes before calling that tool again — don't assume consent. " +
           "If a user_data question is present, it has numbered options plus room for a custom answer — read every option aloud clearly, pausing between them. " +
           "If the caller picks a number, restate which option that was in your own words before calling answer_question, and pass the full option text as the answer, not just the number. If they give a custom answer, pass their words directly. " +

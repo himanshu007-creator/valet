@@ -2,6 +2,7 @@ import type { WebSocket } from "ws";
 import { sql } from "./db.ts";
 import { triggerCallback } from "./bolna.ts";
 import { env } from "./env.ts";
+import { isCallActive } from "./call-guard.ts";
 import { getIssueById } from "./cache.ts";
 import { postComment } from "./linear.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
@@ -140,9 +141,13 @@ async function handleRunnerMessage(raw: string) {
 
   await notifyPush("VALET", summary, job.ticket_id).catch((err) => console.error("push notify failed", err));
 
-  if (env.allowedCallerNumber) {
+  // reproduced live: a job finishing mid-call triggered a second, overlapping outbound call —
+  // push + the Linear comment above already cover it; one phone call at a time.
+  if (env.allowedCallerNumber && !isCallActive()) {
     await triggerCallback(env.allowedCallerNumber, summary, question).catch((err) =>
       console.error("callback trigger failed", err),
     );
+  } else if (env.allowedCallerNumber) {
+    console.log("skipping callback — caller is already on a call");
   }
 }

@@ -181,12 +181,25 @@ export async function runJob(resolved: ResolvedRepo, ticket: Ticket, jobId: stri
 
   const branch = `valet/${id}`;
   const worktreeDir = path.join(resolved.repoPath, "..", `${path.basename(resolved.repoPath)}-${id}`);
+  // Reproduced live: "fatal: not a git repository" on a path resolveRepo() just handed back —
+  // whatever the exact cause (two tickets racing onto the same freshly-created repo name is
+  // the leading suspect, given MAX_PARALLEL concurrent jobs), don't trust the promise blindly.
+  if (!existsSync(path.join(resolved.repoPath, ".git"))) {
+    console.log(`${resolved.repoPath} isn't a git repo yet — initializing before the worktree add`);
+    await exec("git", ["init", "-b", "main"], { cwd: resolved.repoPath });
+    await exec("git", ["commit", "--allow-empty", "-m", "init"], { cwd: resolved.repoPath }).catch(() => {});
+  }
   // -B (not -b): a stale branch/worktree from an earlier crashed or orphaned attempt on the
   // same ticket must not block a fresh order — reset to a clean branch off origin/main instead.
   if (existsSync(worktreeDir)) {
     await exec("git", ["worktree", "remove", worktreeDir, "--force"], { cwd: resolved.repoPath }).catch(() => {});
   }
-  await exec("git", ["worktree", "add", worktreeDir, "-B", branch, "origin/main"], { cwd: resolved.repoPath });
+  await exec("git", ["worktree", "add", worktreeDir, "-B", branch, "origin/main"], { cwd: resolved.repoPath }).catch(async (err) => {
+    // still no usable origin/main (e.g. a genuinely brand-new repo with no remote yet) —
+    // fall back to branching off whatever HEAD exists locally rather than hard-failing the job.
+    console.log(`worktree add against origin/main failed (${err.message?.split("\n")[0]}), retrying off HEAD`);
+    await exec("git", ["worktree", "add", worktreeDir, "-B", branch], { cwd: resolved.repoPath });
+  });
   await copyEnvFiles(resolved.repoPath, worktreeDir);
 
   const prompt = render(IMPL_PROMPT, ticket);
