@@ -5,7 +5,10 @@ Ticket {{TICKET_ID}}: {{TICKET_TITLE}}
 
 {{TICKET_DESCRIPTION}}
 
-Research whatever is relevant (existing repos, prior art, constraints) and write
+Research whatever is relevant (existing repos, prior art, constraints), but be decisive about it —
+the codebase itself answers most of this; reach for a web search or fetch only when something is
+genuinely unknowable from the repo, and stop after the first search that answers it instead of
+cross-checking with more. Speed matters here as much as thoroughness. Then write
 `{{PLAN_FILE}}.md` in the current directory with these sections, each short and concrete —
 no filler, no restating the ticket:
 

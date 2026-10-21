@@ -140,7 +140,11 @@ async function launch(jobDir: string, cwd: string, dataDir: string, logPath: str
   // .zshrc (where Homebrew's PATH normally comes from) never runs. Bake the runner daemon's own
   // PATH (correct, verified via the launchd plist) directly into the script so it's self-
   // sufficient regardless of who launches it — Ghostty, headless spawn, or anything else.
-  const script = `#!/bin/bash\nexport PATH="${process.env.PATH}"\nprintf '\\033]0;${tabTitle}\\007'\ncd "${cwd}"\nXDG_DATA_HOME="${dataDir}" opencode run ${opencodeExtraArgs}--auto "$(cat "${messagePath}")" 2>&1 | tee ${teeArgs} "${logPath}"\n`;
+  // --variant minimal: confirmed live (timed) that opencode accepts it without error and it
+  // trades reasoning depth for speed — the explicit ask here ("blazing speed") over the default
+  // reasoning effort. Combined with the prompts' own "be decisive, minimize outside research"
+  // instructions above — those cut wall-clock research/tool-call time, this cuts model latency.
+  const script = `#!/bin/bash\nexport PATH="${process.env.PATH}"\nprintf '\\033]0;${tabTitle}\\007'\ncd "${cwd}"\nXDG_DATA_HOME="${dataDir}" opencode run ${opencodeExtraArgs}--variant minimal --auto "$(cat "${messagePath}")" 2>&1 | tee ${teeArgs} "${logPath}"\n`;
   await writeFile(scriptPath, script);
   await chmod(scriptPath, 0o755);
   if (headless) {

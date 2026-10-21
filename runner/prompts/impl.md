@@ -4,7 +4,10 @@ Ticket {{TICKET_ID}}: {{TICKET_TITLE}}
 
 {{TICKET_DESCRIPTION}}
 
-Research the codebase for this ticket, then write `docs/impl/{{TICKET_ID}}.md` with exactly these sections:
+Research the codebase for this ticket — be decisive: read what you need, don't re-read files you've
+already seen, and only reach outside the repo (web search/fetch) if something is genuinely
+unanswerable from the code itself. Speed matters here as much as thoroughness. Then write
+`docs/impl/{{TICKET_ID}}.md` with exactly these sections:
 
 ## Summary
 ## Files involved
