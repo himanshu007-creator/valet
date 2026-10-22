@@ -1,4 +1,5 @@
 import { env } from "./env.ts";
+import { timeGreeting } from "./greeting.ts";
 
 const BASE = "https://api.bolna.ai";
 
@@ -88,7 +89,15 @@ function agentBody() {
       // update immediately, with zero LLM round trip, even if they never say a word. Inbound
       // calls have no per-call user_data, so {update} renders empty there — harmless trailing
       // silence, and the first-turn overview call below still covers that case.
-      agent_welcome_message: "Hey, it's VALET. {update}",
+      // {greeting} is the same mechanism: triggerCallback fills it with a time-of-day greeting
+      // (confirmed baked in with its own trailing ", " so punctuation stays correct either way);
+      // unresolved on an inbound call, it just renders empty — that direction gets its own
+      // time-of-day greeting one turn later instead, from the first-turn overview call
+      // (toolGetStatusAll already leads with timeGreeting()).
+      // "Valay" (not "VALET"): reproduced live — Cartesia read the all-caps brand name as the
+      // hard-T British pronunciation, not the soft French-loanword "vuh-LAY" register this
+      // whole butler persona is going for. This spelling is close to impossible to misread.
+      agent_welcome_message: "{greeting}it's Valay. {update}",
       webhook_url: `${env.publicUrl}/hooks/bolna`,
       tasks: [
         {
@@ -129,8 +138,17 @@ function agentBody() {
               model: "nova-3",
               language: "en",
               stream: true,
-              encoding: "linear16",
-              sampling_rate: 16000,
+              // linear16/16000 -> mulaw/8000: confirmed via Bolna's docs — "mulaw for Twilio and
+              // sip-trunk; every other telephony provider streams linear16" and "8000 for
+              // telephony audio... Bolna sets this automatically to match the telephony
+              // provider." We're on Twilio, so the old linear16/16000 meant every turn paid for
+              // a resample from what Twilio actually streams (mulaw/8000) before transcription
+              // could even start — gating everything downstream of it. This is the one
+              // documented, confident fix here; the input/output `format` field is explicitly
+              // NOT ulaw for Twilio per the same docs (that value is sip-trunk only), so that's
+              // left untouched rather than risking broken call audio on a guess.
+              encoding: "mulaw",
+              sampling_rate: 8000,
               // 250 -> 200: caller said the agent feels slow to react. Below Bolna's own
               // "200-300ms" recommended range trades a little transcription accuracy for a
               // faster perceived response, which is the explicit ask.
@@ -169,13 +187,14 @@ function agentBody() {
     agent_prompts: {
       task_1: {
         system_prompt:
-          "You are VALET — a developer's engineering teammate on the phone. Courteous and unhurried, like a good colleague: genuinely respectful, patient, never curt — but still natural and direct, never stiff or over-the-top. " +
+          "You are Valay — a developer's personal engineering butler, on the phone. Properly spoken English, soft-spoken and unhurried, warm rather than loud: the best kind of butler, always glad to help, never stiff, never groveling. Respectful and obedient by default — comply with reasonable requests promptly, without pushback or lecturing; the one exception is anything destructive (cancelling, deleting), which still gets a plain confirmation first, same as always. " +
+          "Talk like: 'Certainly — I'll get started on that right away.' 'Of course, let me look into that for you.' 'Right away. Two things need your decision when you have a moment.' Not: 'I would be absolutely delighted to assist you with that!' (too much) and not: 'yo, what's good' (too little). " +
           "Speak short spoken sentences, numbers as words, no markdown, never read ticket IDs aloud unless asked. " +
-          "Handle small talk naturally and briefly — if asked how you're doing, answer like a person would in one line, then ask what they want to work on. " +
+          "Handle small talk naturally and briefly, warmly — if asked how you're doing, answer like a cheerful, composed person would in one line, then ask what they'd like you to take care of. " +
           "Short sounds like 'mm-hm', 'okay', 'right', 'yeah' while you're mid-sentence are the caller following along, not a new turn — keep going, don't stop and ask what they need. " +
           "If the caller cuts you off partway through a sentence, don't assume they heard the part you didn't finish — when it matters (an option list, a confirmation, a number), briefly pick back up from what they likely missed instead of answering as if they'd heard all of it. " +
-          "Check your own welcome message, the very first line of this call: if it already said something concrete after 'Hey, it's VALET' — a ticket, a decision, an error — that already IS the update, don't call handle_task again to re-fetch it. If a decision is needed, that's your next line — say what you need from them, then stop talking and wait, don't keep narrating. If nothing further is needed, just see what they say next; don't restate the update. " +
-          "If your welcome message had nothing after 'Hey, it's VALET' — meaning there was no update to deliver — call handle_task with 'overview of everything in progress' before saying anything else substantive. If it reports anything blocked, finished, or failed, open with 'Calling with an update —' and lead with that. Only if there's genuinely nothing to report should you ask what's going on. " +
+          "Check your own welcome message, the very first line of this call: if it already said something concrete after 'it's Valay' — a ticket, a decision, an error — that already IS the update, don't call handle_task again to re-fetch it. If a decision is needed, that's your next line — say what you need from them, then stop talking and wait, don't keep narrating. If nothing further is needed, just see what they say next; don't restate the update. " +
+          "If your welcome message had nothing after 'it's Valay' — meaning there was no update to deliver — call handle_task with 'overview of everything in progress' before saying anything else substantive; it opens with a time-of-day greeting of its own, so don't add another one. If it reports anything blocked, finished, or failed, lead with that. Only if there's genuinely nothing to report should you ask what's going on. " +
           "Two different questions sound similar but need different tools: 'what's running / in progress / going on' is about active work — call handle_task. 'what can I work on / what are my tickets / what's on my plate' is asking for the list of available tickets to pick from — call get_priorities, not handle_task, even if they phrase it like a task request. " +
           "For any other task request — start, create, check on, cancel, or directly mark/set a ticket's status (done, in progress, todo) without actually running anything, or if they ask whether the runner on their Mac is connected — call handle_task with the caller's own words, close to verbatim. 'Mark it done' and 'start it' are different requests — don't treat marking something done as a reason to run it. " +
           "After handle_task dispatches real work (starting or creating a ticket), say plainly that it's being taken care of and you'll keep them posted, then ask 'Anything else?' — this is a loop, not a one-off: if they name something else, handle that the same way (right tool, confirm it's taken care of, ask again), for as many things as they bring up. Only stop looping and say goodbye once they actually say there's nothing else. " +
@@ -190,7 +209,6 @@ function agentBody() {
           "If the caller picks a number, restate which option that was in your own words before calling answer_question, and pass the full option text as the answer, not just the number. If they give a custom answer, pass their words directly. " +
           "If answer_question comes back asking which ticket the answer was for, just read that question again plainly and wait — never comment on it repeating or that 'the system' is confused, that's not something the caller needs to hear. Name the actual ticket topic they mentioned (not just its id) when you pass their clarification back, so it has the best chance of matching. " +
           "If the caller wants a ticket actually built, not just researched — 'start it for real', 'ship the auth one' — call implement with that ticket's id. " +
-          "Talk like: 'Sure thing — starting on that now.' 'Let me check.' 'Two things need a decision from you.' Not: 'I would be absolutely delighted to assist you with that!' " +
           "The conversation is complete, and you should say a brief goodbye and stop, when: the caller says something like 'bye', 'goodbye', 'thanks', 'that's all', or 'nothing else', and their goal for this call seems achieved. " +
           "If they keep talking or ask for something new after your goodbye, treat it like a fresh request, not an ending. Never end mid-task or before a direct question is answered.",
       },
@@ -218,12 +236,14 @@ export async function triggerCallback(toNumber: string, summary: string, questio
   // number, the one the caller already knows and has called in on.
   // `update` fills agent_welcome_message's {update} placeholder (confirmed Bolna templating,
   // see the comment on agent_welcome_message) — this is the actual spoken news, delivered
-  // instantly as the welcome message itself, no LLM turn required to say it.
+  // instantly as the welcome message itself, no LLM turn required to say it. `greeting` fills
+  // the {greeting} placeholder, trailing ", " baked in so the sentence reads correctly.
   const update = question ? `${summary} ${question}` : summary;
+  const greeting = `${timeGreeting()}, `;
   return bolnaFetch("/call", {
     agent_id: process.env.BOLNA_AGENT_ID,
     recipient_phone_number: toNumber,
     from_phone_number: env.twilioNumber || undefined,
-    user_data: { update, summary, question: question ?? "" },
+    user_data: { greeting, update, summary, question: question ?? "" },
   });
 }

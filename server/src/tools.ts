@@ -5,6 +5,7 @@ import { broadcastStatus } from "./dashboard-link.ts";
 import { createIssue, archiveIssue, setIssueState } from "./linear.ts";
 import { classifyAndMatch, matchTicket, BAND } from "./router.ts";
 import { env } from "./env.ts";
+import { timeGreeting } from "./greeting.ts";
 
 // shared by the Bolna phone tools (HTTP) and desk mode's local tool-calling loop —
 // one implementation, two callers, so neither drifts from the other.
@@ -155,7 +156,11 @@ export async function toolGetStatusAll(): Promise<string> {
     sql`select status, title from jobs where status in ('queued', 'running')`,
     liveBlockedJobs(),
   ]);
-  const parts: string[] = [online ? "The runner on your Mac is connected." : "The runner on your Mac isn't connected right now."];
+  // covers inbound calls: the welcome message can't know the real time (no per-call data for
+  // inbound), but this overview always runs on an inbound call's first turn — this is the
+  // actual first thing a caller who rings in hears, so it's where their time-of-day greeting
+  // lands for that direction.
+  const parts: string[] = [`${timeGreeting()}!`, online ? "The runner on your Mac is connected." : "The runner on your Mac isn't connected right now."];
   if (activeJobs.length === 0 && blocked.length === 0) {
     parts.push("Nothing running right now.");
   } else {
