@@ -7,6 +7,7 @@ import { getIssueById, invalidateIssueCache } from "./cache.ts";
 import { postComment, setIssueState } from "./linear.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
 import { notifyPush } from "./push.ts";
+import { liveBlockedJobs } from "./blocked.ts";
 
 let runnerSocket: WebSocket | null = null;
 
@@ -29,13 +30,33 @@ export async function catchUpIfNeeded() {
   if (!env.allowedCallerNumber || isCallActive()) return;
   if (Date.now() - lastCatchupAttempt < CATCHUP_DEBOUNCE_MS) return;
 
-  const [undelivered] = await sql`select count(*)::int as n from jobs where status in ('done', 'failed', 'timeout') and delivered_at is null`;
-  const [blocked] = await sql`select count(*)::int as n from jobs where status = 'blocked'`;
-  if (undelivered.n === 0 && blocked.n === 0) return;
+  // reproduced live, twice: (1) the raw unfiltered count included stale 'blocked' rows for
+  // tickets already marked Completed in Linear hours earlier — this is exactly the bug
+  // liveBlockedJobs() was built to fix for every other path, just never wired in here. (2) a
+  // genuinely still-blocked ticket kept re-triggering a fresh callback after every single call
+  // that ended afterward, forever, saying nothing but "catching up" with zero real content —
+  // surfaced_at (set below) stops a blocked item from generating more than one unprompted
+  // callback; the caller can still always ask what's pending to hear it again.
+  const [undelivered, blocked] = await Promise.all([
+    sql`select id, ticket_id, title, status, pr_url, doc_url from jobs where status in ('done', 'failed', 'timeout') and delivered_at is null order by finished_at asc`,
+    liveBlockedJobs().then((rows) => rows.filter((r) => !r.surfaced_at)),
+  ]);
+  if (undelivered.length === 0 && blocked.length === 0) return;
 
   lastCatchupAttempt = Date.now();
-  console.log(`catching up: ${undelivered.n} undelivered, ${blocked.n} blocked`);
-  await triggerCallback(env.allowedCallerNumber, "Catching up on what happened while you were on a call.").catch((err) =>
+  const parts: string[] = [];
+  for (const j of undelivered) {
+    if (j.status === "done") parts.push(`${j.title} is ready${j.pr_url ? ` — PR: ${j.pr_url}` : j.doc_url ? `: ${j.doc_url}` : ""}.`);
+    else parts.push(`${j.title} hit an error.`);
+  }
+  for (const b of blocked) parts.push(`${b.title} needs a decision: ${b.question ?? "no question text recorded"}.`);
+  const summary = parts.join(" ");
+
+  if (undelivered.length > 0) await sql`update jobs set delivered_at = now() where id in ${sql(undelivered.map((j) => j.id))}`;
+  if (blocked.length > 0) await sql`update jobs set surfaced_at = now() where id in ${sql(blocked.map((b) => b.id))}`;
+
+  console.log(`catching up: ${undelivered.length} undelivered, ${blocked.length} newly-surfaced blocked`);
+  await triggerCallback(env.allowedCallerNumber, summary).catch((err) =>
     console.error("catch-up callback failed", err),
   );
 }

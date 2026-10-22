@@ -59,3 +59,13 @@ alter table jobs add column if not exists delivered_at timestamptz;
 alter table jobs add column if not exists ticket_url text;
 alter table jobs add column if not exists doc_url text;
 alter table jobs add column if not exists description text;
+
+-- reproduced live: a blocked ticket never gets a delivered_at (that column is terminal-status
+-- only, by design — see above), so catchUpIfNeeded's "is there anything still waiting" check
+-- kept re-triggering a proactive callback about the exact same unanswered blocked question after
+-- every single future call ended, forever, with no new content each time. surfaced_at marks
+-- "this blocked question has already been proactively called about once" — set only by
+-- catchUpIfNeeded itself, never by the caller asking directly (asking is caller-initiated, fine
+-- to repeat); a stale/unresolved blocked item stops generating new unprompted callbacks after
+-- the first one, without hiding it from someone who actually asks what's pending.
+alter table jobs add column if not exists surfaced_at timestamptz;

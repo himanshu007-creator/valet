@@ -6,6 +6,7 @@ import { createIssue, archiveIssue, setIssueState } from "./linear.ts";
 import { classifyAndMatch, matchTicket, BAND } from "./router.ts";
 import { env } from "./env.ts";
 import { timeGreeting } from "./greeting.ts";
+import { liveBlockedJobs } from "./blocked.ts";
 
 // shared by the Bolna phone tools (HTTP) and desk mode's local tool-calling loop —
 // one implementation, two callers, so neither drifts from the other.
@@ -31,19 +32,6 @@ async function runnerConnectedWithRetry(): Promise<boolean> {
 // about HIM-11 and HIM-12 long after both were marked Completed directly in Linear. Linear is
 // the real source of truth for "is this still open" — check it live on every read instead of
 // trusting the DB's own stale status column.
-async function liveBlockedJobs() {
-  const rows = await sql`select id, ticket_id, title, question from jobs where status = 'blocked' order by finished_at desc`;
-  const checked = await Promise.all(
-    rows.map(async (r) => {
-      const issue = await getIssueById(r.ticket_id).catch(() => undefined);
-      // no issue found (deleted/archived), or no longer in a started-type state (completed,
-      // cancelled, or reset back to todo some other way) — the question is moot either way.
-      return issue && issue.state?.type === "started" ? r : null;
-    }),
-  );
-  return checked.filter((r) => r !== null);
-}
-
 export async function toolGetPriorities(): Promise<string> {
   return getPrioritiesSummary();
 }
@@ -133,7 +121,16 @@ export async function toolProbeTask(ticketId: string): Promise<string> {
     select status, question, pr_url, title from jobs where ticket_id = ${ticketId}
     order by finished_at desc nulls first, started_at desc nulls last limit 1
   `;
-  if (!job) return `I don't have anything on ${ticketId} yet.`;
+  if (!job) {
+    // reproduced live: a ticket created minutes before the call, never dispatched — only the
+    // jobs table was checked, which has nothing until a ticket is actually started. "I don't
+    // have anything on this yet" made a real ticket with a full description sound like it
+    // didn't exist. Fall back to the actual Linear content before giving up.
+    const issue = await getIssueById(ticketId);
+    if (!issue) return `I couldn't find a ticket called ${ticketId}.`;
+    const desc = issue.description?.trim();
+    return `${issue.title}.${desc ? ` ${desc}` : ""} It hasn't been started yet — want me to start it?`;
+  }
   const phrase = STATUS_PHRASE[job.status] ?? ((t: string) => `${t} is ${job.status}`);
   const parts = [`${phrase(job.title)}.`];
   if (job.status === "blocked" && job.question) parts.push(`Waiting on: ${job.question}`);
