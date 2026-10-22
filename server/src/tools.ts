@@ -271,6 +271,11 @@ let pendingDelete: { ticketId: string; issueId: string; title: string; expiresAt
 // just not hard-gated regardless of confidence the way delete is — a clear, high-confidence
 // "create a ticket for X" still goes straight through, no added friction for the common case.
 let pendingCreate: { title: string; description: string; expiresAt: number } | null = null;
+// reproduced live: "start the Brainstorm next project idea ticket" misclassified as "create"
+// (the ticket's own title reads as a creation verb) — the duplicate-match branch below asked
+// "want me to start that instead?" with no state to catch the answer, so every "yes" just
+// reclassified from scratch and landed back on the same question. Infinite loop, never dispatched.
+let pendingExecute: { ticketId: string; expiresAt: number } | null = null;
 const CREATE_CONFIDENCE_THRESHOLD = 0.7;
 const AFFIRM_RE = /\b(yes|yeah|yep|yup|confirm(ed)?|do it|go ahead|sure|please do)\b/i;
 const NEGATE_RE = /\b(no|don'?t|do not|nevermind|never mind|stop|cancel that)\b/i;
@@ -341,6 +346,19 @@ export async function toolHandleTask(request: string): Promise<string> {
   }
   pendingCreate = null;
 
+  if (pendingExecute && pendingExecute.expiresAt > Date.now()) {
+    if (NEGATE_RE.test(text)) {
+      pendingExecute = null;
+      return "Okay, leaving it as is.";
+    }
+    if (AFFIRM_RE.test(text)) {
+      const { ticketId } = pendingExecute;
+      pendingExecute = null;
+      return toolOrder(ticketId);
+    }
+  }
+  pendingExecute = null;
+
   if (WANTS_PENDING_LIST.test(text)) return listBlockedQuestions();
 
   const issues = await getCachedIssues();
@@ -369,6 +387,7 @@ export async function toolHandleTask(request: string): Promise<string> {
     case "create": {
       if (id && confidence >= BAND.LOW) {
         const existing = candidates.find((c) => c.id === id);
+        pendingExecute = { ticketId: id, expiresAt: Date.now() + 2 * 60 * 1000 };
         return `That sounds like it might already be ${id} — "${existing?.title}". Want me to start that instead?`;
       }
       const { title, description } = await composeTicket(text);
