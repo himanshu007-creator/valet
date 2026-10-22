@@ -26,15 +26,20 @@ const SYSTEM_PROMPT =
   "If answer_question asks which ticket the answer was for, just read that question again plainly and wait — don't comment on it repeating. Name the ticket's actual topic, not just its id, when passing their clarification back. " +
   "If asked to actually build a ticket, not just research it, call implement with that ticket's id.";
 
-export function useDesk() {
+export function useDesk(token: string | null) {
   const backend = useMemo(
     () =>
       new OpenAICompat({
         baseURL: `${API_URL}/desk`,
         models: { stt: "nova-3", llm: "groq-tools", tts: "sonic-2" },
         voice: "default",
+        // the desk routes are session-cookie-gated (requireAuth), but this client's own fetch()
+        // calls don't set credentials:"include" — a cross-origin cookie (prod: Vercel -> Render)
+        // never gets attached regardless of login state. apiKey sends it as a Bearer header
+        // instead, which requireAuth also accepts — see server/src/auth.ts's sessionToken().
+        apiKey: token ?? undefined,
       }),
-    [],
+    [token],
   );
 
   return useAuricle({ backend, systemPrompt: SYSTEM_PROMPT, profile: "speakers" });

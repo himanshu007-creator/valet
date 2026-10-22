@@ -39,7 +39,7 @@ function useDashboardSocket(onStatus: (s: Status) => void) {
   }, []);
 }
 
-function Dashboard({ username, onLogout }: { username: string; onLogout: () => void }) {
+function Dashboard({ username, token, onLogout }: { username: string; token: string | null; onLogout: () => void }) {
   const [priorities, setPriorities] = useState("");
   const [status, setStatus] = useState<Status>({ order: null });
   const [searchParams, setSearchParams] = useSearchParams();
@@ -111,7 +111,7 @@ function Dashboard({ username, onLogout }: { username: string; onLogout: () => v
             <p className="priorities">{priorities || "Loading…"}</p>
           </section>
 
-          <DeskMode />
+          <DeskMode token={token} />
 
           <section>
             <h2>Latest order</h2>
@@ -147,7 +147,7 @@ function Dashboard({ username, onLogout }: { username: string; onLogout: () => v
 }
 
 export default function App() {
-  const { checked, username, setState, logout } = useAuth();
+  const { checked, username, token, setState, logout } = useAuth();
 
   if (!checked) return null;
 
@@ -156,9 +156,9 @@ export default function App() {
       <Route path="/" element={<Landing authed={!!username} />} />
       <Route
         path="/login"
-        element={username ? <Navigate to="/app" replace /> : <LoginForm onAuthed={(u) => setState({ checked: true, username: u })} />}
+        element={username ? <Navigate to="/app" replace /> : <LoginForm onAuthed={(u, t) => setState({ checked: true, username: u, token: t })} />}
       />
-      <Route path="/app" element={username ? <Dashboard username={username} onLogout={logout} /> : <Navigate to="/login" replace />} />
+      <Route path="/app" element={username ? <Dashboard username={username} token={token} onLogout={logout} /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

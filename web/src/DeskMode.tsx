@@ -1,7 +1,7 @@
 import { useDesk } from "./voice/useDesk.ts";
 
-export default function DeskMode() {
-  const { state, probability, agentText, heardText, error, start, stop } = useDesk();
+export default function DeskMode({ token }: { token: string | null }) {
+  const { state, probability, agentText, heardText, error, start, stop } = useDesk(token);
 
   const running = state !== "idle";
   const orbScale = 1 + Math.min(probability, 1) * 0.5;

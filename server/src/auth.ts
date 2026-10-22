@@ -46,8 +46,20 @@ function setSessionCookie(reply: FastifyReply, token: string) {
   });
 }
 
+function sessionToken(req: FastifyRequest): string | undefined {
+  // desk mode's underlying HTTP client (the `auricle` package) does its own bare fetch() with
+  // no credentials option, so the browser never attaches the (necessarily httpOnly) session
+  // cookie cross-origin — reproduced live: every desk request 401'd regardless of login state,
+  // on the deployed site where the frontend and API are genuinely different origins. Its config
+  // does support an `apiKey`, sent as `Authorization: Bearer <token>` — so desk mode is handed
+  // the session token directly (see /auth/login's response) and authenticates that way instead.
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith("Bearer ")) return authHeader.slice("Bearer ".length);
+  return req.cookies[COOKIE_NAME];
+}
+
 export function requireAuth(req: FastifyRequest, reply: FastifyReply, done: (err?: Error) => void) {
-  const token = req.cookies[COOKIE_NAME];
+  const token = sessionToken(req);
   const session = token && sessions.get(token);
   if (!session || session.expires < Date.now()) {
     reply.code(401).send({ error: "not authenticated" });
@@ -68,7 +80,7 @@ export function registerAuthRoutes(app: FastifyInstance) {
     const token = randomBytes(32).toString("hex");
     sessions.set(token, { userId: user.id, username: user.username, expires: Date.now() + SESSION_MS });
     setSessionCookie(reply, token);
-    return { username: user.username };
+    return { username: user.username, token };
   });
 
   app.post("/auth/login", async (req, reply) => {
@@ -90,7 +102,7 @@ export function registerAuthRoutes(app: FastifyInstance) {
     const token = randomBytes(32).toString("hex");
     sessions.set(token, { userId: user.id, username: user.username, expires: Date.now() + SESSION_MS });
     setSessionCookie(reply, token);
-    return { username: user.username };
+    return { username: user.username, token };
   });
 
   app.post("/auth/logout", async (req, reply) => {
@@ -104,7 +116,10 @@ export function registerAuthRoutes(app: FastifyInstance) {
     const token = req.cookies[COOKIE_NAME];
     const session = token && sessions.get(token);
     if (!session || session.expires < Date.now()) return reply.code(401).send({ error: "not authenticated" });
-    return { username: session.username };
+    // a page reload loses the in-memory desk-mode token (see requireAuth's sessionToken) even
+    // though the httpOnly cookie itself is still valid — hand it back here so desk mode can
+    // re-arm without forcing a fresh login.
+    return { username: session.username, token };
   });
 
   app.get("/auth/signup-available", async () => {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
-type AuthState = { checked: boolean; username: string | null };
+type AuthState = { checked: boolean; username: string | null; token: string | null };
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -23,12 +23,12 @@ export async function api(path: string, body?: unknown) {
 }
 
 export function useAuth() {
-  const [state, setState] = useState<AuthState>({ checked: false, username: null });
+  const [state, setState] = useState<AuthState>({ checked: false, username: null, token: null });
 
   useEffect(() => {
     api("/auth/me")
-      .then((d) => setState({ checked: true, username: d.username }))
-      .catch(() => setState({ checked: true, username: null }));
+      .then((d) => setState({ checked: true, username: d.username, token: d.token }))
+      .catch(() => setState({ checked: true, username: null, token: null }));
   }, []);
 
   // reproduced live: no body meant api()'s method:body?"POST":"GET" picked GET, but the server
@@ -36,12 +36,12 @@ export function useAuth() {
   const logout = () =>
     api("/auth/logout", {})
       .catch(() => {})
-      .then(() => setState({ checked: true, username: null }));
+      .then(() => setState({ checked: true, username: null, token: null }));
 
   return { ...state, setState, logout };
 }
 
-export function LoginForm({ onAuthed }: { onAuthed: (username: string) => void }) {
+export function LoginForm({ onAuthed }: { onAuthed: (username: string, token: string) => void }) {
   const [signupAvailable, setSignupAvailable] = useState(false);
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [username, setUsername] = useState("");
@@ -64,7 +64,7 @@ export function LoginForm({ onAuthed }: { onAuthed: (username: string) => void }
     setBusy(true);
     try {
       const d = await api(mode === "signup" ? "/auth/signup" : "/auth/login", { username, password });
-      onAuthed(d.username);
+      onAuthed(d.username, d.token);
     } catch (err) {
       setError(err instanceof Error ? err.message : "something went wrong");
     } finally {
