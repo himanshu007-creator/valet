@@ -26,3 +26,12 @@ export const env = {
   typesafeApiKey: process.env.TYPESAFE_API_KEY ?? "",
   githubToken: process.env.GH_TOKEN ?? "",
 };
+
+const allowedOrigins = (process.env.ALLOWED_WEB_ORIGINS ?? "").split(",").filter(Boolean);
+
+// shared with index.ts's @fastify/cors registration — a route that writes to reply.raw directly
+// (desk.ts's chat/completions, for SSE) bypasses @fastify/cors's onSend hook entirely, so it has
+// to compute and set the Access-Control-Allow-Origin header itself using this same check.
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  return !origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || allowedOrigins.includes(origin);
+}

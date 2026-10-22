@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
-import { env } from "./env.ts";
+import { env, isAllowedOrigin } from "./env.ts";
 import { prefetchPriorities } from "./cache.ts";
 import { setRunnerSocket, catchUpIfNeeded } from "./runner-link.ts";
 import { addDashboardClient, getStatus, getOrderHistory, broadcastStatus } from "./dashboard-link.ts";
@@ -21,10 +21,9 @@ await app.register(cookie);
 // credentialed cookies need a real origin echoed back, "*" is rejected by browsers once
 // credentials are involved. ALLOWED_WEB_ORIGINS is a comma list for prod (the Vercel domain);
 // any localhost origin is always allowed so local dev doesn't need it set.
-const allowedOrigins = (process.env.ALLOWED_WEB_ORIGINS ?? "").split(",").filter(Boolean);
 await app.register(cors, {
   origin: (origin, cb) => {
-    if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || allowedOrigins.includes(origin)) return cb(null, true);
+    if (isAllowedOrigin(origin)) return cb(null, true);
     cb(new Error("origin not allowed"), false);
   },
   credentials: true,
