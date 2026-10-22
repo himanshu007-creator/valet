@@ -30,6 +30,7 @@ export function Stats() {
   if (tools.length === 0) return <p className="muted">No tool calls yet this session.</p>;
 
   return (
+    <div className="table-scroll">
     <table className="stats-table">
       <thead>
         <tr>
@@ -50,5 +51,6 @@ export function Stats() {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }

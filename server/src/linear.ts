@@ -124,8 +124,28 @@ export async function archiveIssue(issueId: string): Promise<void> {
 }
 
 // Linear's workflow states are per-team and named freely ("In Progress", "Todo", etc.) but
-// each has a stable `type`: unstarted | started | completed | canceled | triage. Caching by
-// type, not name, so this doesn't break if the team's states ever get renamed.
+// each has a stable `type`: unstarted | started | completed | canceled | triage. Fetched once
+// and cached for process lifetime — shared by the type-based lookup below and the name-based one
+// (e.g. "Awaiting inputs", which has no corresponding `type` in Linear's fixed enum).
+let teamStatesCache: { id: string; name: string; type: string }[] | null = null;
+
+async function fetchTeamStates(): Promise<{ id: string; name: string; type: string }[]> {
+  if (teamStatesCache) return teamStatesCache;
+  const teamId = await getDefaultTeamId();
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: { Authorization: env.linearApiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: `query($teamId: String!) { team(id: $teamId) { states { nodes { id name type } } } }`,
+      variables: { teamId },
+    }),
+  });
+  const json = await res.json();
+  if (!res.ok || json.errors) throw new Error(`linear states fetch failed: ${JSON.stringify(json.errors ?? json)}`);
+  teamStatesCache = json.data.team.states.nodes;
+  return teamStatesCache!;
+}
+
 let stateIdsByType: Record<string, string> | null = null;
 
 // a team can have more than one state of the same type (confirmed: "In Progress" and "In
@@ -135,34 +155,26 @@ const PREFERRED_NAME: Partial<Record<string, string>> = { started: "in progress"
 
 async function getStateId(type: "started" | "unstarted" | "completed"): Promise<string | null> {
   if (!stateIdsByType) {
-    const teamId = await getDefaultTeamId();
-    const res = await fetch("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: { Authorization: env.linearApiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: `query($teamId: String!) { team(id: $teamId) { states { nodes { id name type } } } }`,
-        variables: { teamId },
-      }),
-    });
-    const json = await res.json();
-    if (!res.ok || json.errors) throw new Error(`linear states fetch failed: ${JSON.stringify(json.errors ?? json)}`);
+    const states = await fetchTeamStates();
     stateIdsByType = {};
     const byType: Record<string, { id: string; name: string }[]> = {};
-    for (const s of json.data.team.states.nodes) (byType[s.type] ??= []).push(s);
-    for (const [t, states] of Object.entries(byType)) {
-      const preferred = states.find((s) => s.name.toLowerCase() === PREFERRED_NAME[t]);
-      stateIdsByType[t] = (preferred ?? states[0]).id;
+    for (const s of states) (byType[s.type] ??= []).push(s);
+    for (const [t, group] of Object.entries(byType)) {
+      const preferred = group.find((s) => s.name.toLowerCase() === PREFERRED_NAME[t]);
+      stateIdsByType[t] = (preferred ?? group[0]).id;
     }
   }
   return stateIdsByType[type] ?? null;
 }
 
-// Linear as the actual source of truth for "is this ticket being worked on" — a caller asking
-// to start something already in a "started"-type state gets turned away before a duplicate job
-// ever gets dispatched, not just an in-memory/DB check that only this process knows about.
-export async function setIssueState(issueId: string, type: "started" | "unstarted" | "completed"): Promise<void> {
-  const stateId = await getStateId(type);
-  if (!stateId) return; // team has no state of this type configured — nothing sensible to set, skip rather than error
+// "blocked" has no corresponding entry in Linear's fixed 5-value type enum, so a state like
+// "Awaiting inputs" can only be targeted by its literal name, not by type.
+async function getStateIdByName(name: string): Promise<string | null> {
+  const states = await fetchTeamStates();
+  return states.find((s) => s.name.toLowerCase() === name.toLowerCase())?.id ?? null;
+}
+
+async function applyStateId(issueId: string, stateId: string): Promise<void> {
   const mutation = `
     mutation($issueId: String!, $stateId: String!) {
       issueUpdate(id: $issueId, input: { stateId: $stateId }) { success }
@@ -176,6 +188,45 @@ export async function setIssueState(issueId: string, type: "started" | "unstarte
   const json = await res.json();
   if (!res.ok || json.errors || !json.data.issueUpdate.success) {
     throw new Error(`linear issueUpdate(state) failed: ${JSON.stringify(json.errors ?? json)}`);
+  }
+}
+
+// Linear as the actual source of truth for "is this ticket being worked on" — a caller asking
+// to start something already in a "started"-type state gets turned away before a duplicate job
+// ever gets dispatched, not just an in-memory/DB check that only this process knows about.
+export async function setIssueState(issueId: string, type: "started" | "unstarted" | "completed"): Promise<void> {
+  const stateId = await getStateId(type);
+  if (!stateId) return; // team has no state of this type configured — nothing sensible to set, skip rather than error
+  await applyStateId(issueId, stateId);
+}
+
+// graceful by design: a state like "Awaiting inputs" is something the user configures in Linear
+// themselves (Team Settings → Workflow, not Project statuses — the two are separate lists) —
+// until it exists there, this just logs and leaves the ticket's state untouched rather than
+// erroring the whole job report.
+export async function setIssueStateByName(issueId: string, name: string): Promise<void> {
+  const stateId = await getStateIdByName(name);
+  if (!stateId) {
+    console.warn(`linear: no issue workflow state named "${name}" found — add it under Team Settings → Workflow`);
+    return;
+  }
+  await applyStateId(issueId, stateId);
+}
+
+export async function updateIssue(issueId: string, fields: { title?: string; description?: string }): Promise<void> {
+  const mutation = `
+    mutation($issueId: String!, $title: String, $description: String) {
+      issueUpdate(id: $issueId, input: { title: $title, description: $description }) { success }
+    }
+  `;
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: { Authorization: env.linearApiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ query: mutation, variables: { issueId, ...fields } }),
+  });
+  const json = await res.json();
+  if (!res.ok || json.errors || !json.data.issueUpdate.success) {
+    throw new Error(`linear issueUpdate failed: ${JSON.stringify(json.errors ?? json)}`);
   }
 }
 

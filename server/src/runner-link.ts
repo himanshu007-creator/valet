@@ -4,8 +4,8 @@ import { triggerCallback } from "./bolna.ts";
 import { env } from "./env.ts";
 import { isCallActive } from "./call-guard.ts";
 import { getIssueById, invalidateIssueCache } from "./cache.ts";
-import { postComment, setIssueState } from "./linear.ts";
-import { broadcastStatus } from "./dashboard-link.ts";
+import { postComment, setIssueState, setIssueStateByName } from "./linear.ts";
+import { broadcastStatus, dashboardClientCount } from "./dashboard-link.ts";
 import { notifyPush } from "./push.ts";
 import { liveBlockedJobs } from "./blocked.ts";
 
@@ -47,13 +47,20 @@ export async function catchUpIfNeeded() {
   const parts: string[] = [];
   for (const j of undelivered) {
     if (j.status === "done") parts.push(`${j.title} is ready${j.pr_url ? ` — PR: ${j.pr_url}` : j.doc_url ? `: ${j.doc_url}` : ""}.`);
-    else parts.push(`${j.title} hit an error.`);
+    else parts.push(`${j.title} hit an error — want me to try it again?`);
   }
   for (const b of blocked) parts.push(`${b.title} needs a decision: ${b.question ?? "no question text recorded"}.`);
   const summary = parts.join(" ");
 
   if (undelivered.length > 0) await sql`update jobs set delivered_at = now() where id in ${sql(undelivered.map((j) => j.id))}`;
   if (blocked.length > 0) await sql`update jobs set surfaced_at = now() where id in ${sql(blocked.map((b) => b.id))}`;
+
+  // same presence check as the terminal-job-finish path: one open dashboard tab already shows
+  // this live, a call on top is pure noise.
+  if (dashboardClientCount() === 1) {
+    console.log("skipping catch-up callback — exactly one dashboard tab is open, already shown live");
+    return;
+  }
 
   console.log(`catching up: ${undelivered.length} undelivered, ${blocked.length} newly-surfaced blocked`);
   await triggerCallback(env.allowedCallerNumber, summary).catch((err) =>
@@ -181,15 +188,19 @@ async function handleRunnerMessage(raw: string) {
     if (body) await postComment(issue.id, body).catch((err) => console.error("linear comment failed", err));
     // Linear as the source of truth for state: done moves it to a completed-type column;
     // failed/timeout move it back to unstarted (not stuck "in progress" forever, and ready to
-    // retry) — the duplicate-dispatch guard in toolOrder checks exactly this field. blocked
-    // deliberately leaves it in the started-type state — it's still actively in flight, just
-    // paused on a decision, not something a second "start it" should treat as fresh work.
+    // retry) — the duplicate-dispatch guard in toolOrder checks exactly this field. blocked moves
+    // it to "Awaiting inputs" (a real, distinct, user-visible state — reproduced live: before
+    // this it just sat in whatever started-type state it already had, indistinguishable from
+    // genuinely still-running work). No explicit move back to started on resume needed: the next
+    // terminal outcome (done/failed/timeout) already calls setIssueState above, which naturally
+    // clears it out of Awaiting inputs.
     if (msg.status === "done") await setIssueState(issue.id, "completed").catch((err) => console.error("linear state update failed", err));
     else if (msg.status === "failed" || msg.status === "timeout") await setIssueState(issue.id, "unstarted").catch((err) => console.error("linear state update failed", err));
+    else if (msg.status === "blocked") await setIssueStateByName(issue.id, "Awaiting inputs").catch((err) => console.error("linear state update failed", err));
     invalidateIssueCache(); // same stale-cache gap as toolOrder's guard — keep the next lookup honest
   }
 
-  const siblings = await sql`select status, title, pr_url, doc_url, question from jobs where order_id = ${job.order_id}`;
+  const siblings = await sql`select id, status, title, pr_url, doc_url, question from jobs where order_id = ${job.order_id}`;
   if (siblings.some((j) => !TERMINAL.has(j.status))) return; // order still has jobs in flight
 
   const done = siblings.filter((j) => j.status === "done");
@@ -205,7 +216,7 @@ async function handleRunnerMessage(raw: string) {
     return `${j.title} is ready.`;
   });
   if (blocked.length > 0) parts.push(`${blocked.length} need a decision.`);
-  if (errored.length > 0) parts.push(`${errored.length} hit an error.`);
+  if (errored.length > 0) parts.push(`${errored.length} hit an error — want me to try ${errored.length > 1 ? "them" : "it"} again?`);
   const summary = parts.join(" ");
   const question = blocked[0]?.question;
 
@@ -213,7 +224,16 @@ async function handleRunnerMessage(raw: string) {
 
   // reproduced live: a job finishing mid-call triggered a second, overlapping outbound call —
   // push + the Linear comment above already cover it; one phone call at a time.
-  if (env.allowedCallerNumber && !isCallActive()) {
+  // Exactly one open dashboard tab: a status change already appeared there instantly over the
+  // live websocket — a phone call on top is pure noise. 0 tabs (nobody's looking) or 2+ (can't
+  // tell who's actually looking at which device) both still call, same as always.
+  if (dashboardClientCount() === 1) {
+    console.log("skipping callback — exactly one dashboard tab is open, already shown live");
+    // blocked jobs deliberately never get delivered_at (they need an actual answer, not just
+    // "shown once") — only done/failed/timeout count as delivered by being seen live.
+    const seenIds = siblings.filter((j) => j.status !== "blocked").map((j) => j.id);
+    if (seenIds.length > 0) await sql`update jobs set delivered_at = now() where id in ${sql(seenIds)}`;
+  } else if (env.allowedCallerNumber && !isCallActive()) {
     await triggerCallback(env.allowedCallerNumber, summary, question).catch((err) =>
       console.error("callback trigger failed", err),
     );

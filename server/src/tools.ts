@@ -2,10 +2,11 @@ import { getPrioritiesSummary, getIssueById, getCachedIssues, invalidateIssueCac
 import { sql } from "./db.ts";
 import { runnerConnected, dispatchJob, dispatchAnswer, dispatchImplement } from "./runner-link.ts";
 import { broadcastStatus } from "./dashboard-link.ts";
-import { createIssue, archiveIssue, setIssueState } from "./linear.ts";
+import { createIssue, archiveIssue, setIssueState, updateIssue } from "./linear.ts";
 import { classifyAndMatch, matchTicket, BAND } from "./router.ts";
 import { env } from "./env.ts";
 import { timeGreeting } from "./greeting.ts";
+import { composeTicket, enrichDescription } from "./compose.ts";
 import { liveBlockedJobs } from "./blocked.ts";
 
 // shared by the Bolna phone tools (HTTP) and desk mode's local tool-calling loop —
@@ -232,8 +233,16 @@ export async function toolAnswerQuestion(answer: string): Promise<string> {
     }
   }
 
-  await sql`update jobs set answer = ${answer} where id = ${job.id}`;
-  await dispatchAnswer(job.id, answer);
+  return recordAnswer(job.id, answer);
+}
+
+// shared by the voice path above (which has to disambiguate which blocked job an answer is for)
+// and the in-app dashboard path (server/src/index.ts's /api/jobs/:id/answer), which already
+// knows the exact job id from the card the caller clicked — no disambiguation needed at all,
+// which makes it strictly more reliable than the voice path for this one case.
+export async function recordAnswer(jobId: string, answer: string): Promise<string> {
+  await sql`update jobs set answer = ${answer} where id = ${jobId}`;
+  await dispatchAnswer(jobId, answer);
   broadcastStatus();
   return "Got it, I'll pass that along.";
 }
@@ -280,6 +289,9 @@ function parseStatusWord(text: string): { type: "started" | "unstarted" | "compl
   for (const w of STATUS_WORD) if (w.re.test(text)) return { type: w.type, label: w.label };
   return null;
 }
+
+const ENRICH_RE = /\b(enrich|add (more )?(detail|context)|flesh out|more context|expand)\b/i;
+const RENAME_RE = /\b(rename|retitle|change the title|set the title)\b/i;
 
 // reproduced live: "let's continue for pending decisions" (following an overview that said
 // "4 waiting on a decision, want me to go through them?") had no real destination — Jev's
@@ -359,12 +371,12 @@ export async function toolHandleTask(request: string): Promise<string> {
         const existing = candidates.find((c) => c.id === id);
         return `That sounds like it might already be ${id} — "${existing?.title}". Want me to start that instead?`;
       }
-      const title = text.length > 80 ? text.slice(0, 80) : text;
+      const { title, description } = await composeTicket(text);
       if (intentConfidence < CREATE_CONFIDENCE_THRESHOLD) {
-        pendingCreate = { title, description: text, expiresAt: Date.now() + 2 * 60 * 1000 };
+        pendingCreate = { title, description, expiresAt: Date.now() + 2 * 60 * 1000 };
         return `Want me to create a new ticket for "${title}"? Say yes to confirm.`;
       }
-      const issue = await createIssue(title, text);
+      const issue = await createIssue(title, description);
       invalidateIssueCache();
       return `Created ${issue.identifier} — "${issue.title}".`;
     }
@@ -393,13 +405,37 @@ export async function toolHandleTask(request: string): Promise<string> {
       return `Done — marked ${id} as ${target.label}.`;
     }
 
+    case "edit": {
+      if (!id) return "I couldn't find a matching ticket to edit.";
+      const issue = await getIssueById(id);
+      if (!issue) return "I couldn't find a matching ticket to edit.";
+      if (ENRICH_RE.test(text)) {
+        const description = await enrichDescription(issue.title, issue.description ?? "", text);
+        await updateIssue(issue.id, { description });
+        invalidateIssueCache();
+        return `Done — added more detail to ${id}.`;
+      }
+      if (RENAME_RE.test(text)) {
+        const { title } = await composeTicket(text);
+        await updateIssue(issue.id, { title });
+        invalidateIssueCache();
+        return `Done — renamed ${id} to "${title}".`;
+      }
+      // ambiguous "update the description to..." — default to enrich rather than overwrite,
+      // less destructive assumption when it's not clear whether they meant replace or append.
+      const description = await enrichDescription(issue.title, issue.description ?? "", text);
+      await updateIssue(issue.id, { description });
+      invalidateIssueCache();
+      return `Done — updated the description on ${id}.`;
+    }
+
     case "execute":
     default: {
       if (id && confidence >= BAND.LOW) return toolOrder(id);
       // journey 3, "unsure": no confident existing match — create then execute.
       if (!(await runnerConnectedWithRetry())) return "The runner on your Mac isn't connected right now, so I can't start that.";
-      const title = text.length > 80 ? text.slice(0, 80) : text;
-      const issue = await createIssue(title, text);
+      const { title, description } = await composeTicket(text);
+      const issue = await createIssue(title, description);
       invalidateIssueCache();
       return toolOrder(issue.identifier);
     }

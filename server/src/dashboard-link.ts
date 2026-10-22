@@ -4,6 +4,14 @@ import { runnerConnected } from "./runner-link.ts";
 
 const clients = new Set<WebSocket>();
 
+// cheapest, already-correct "is the user looking at this right now" signal — a connection here
+// means an authenticated (requireAuth-gated) tab has /app open with its live socket connected,
+// and desk mode can't be open without this also being true (same mount). Used to decide
+// call-vs-notify: a real-time update already appearing live makes a phone call on top pure noise.
+export function dashboardClientCount(): number {
+  return clients.size;
+}
+
 export function addDashboardClient(ws: WebSocket) {
   clients.add(ws);
   ws.on("close", () => clients.delete(ws));

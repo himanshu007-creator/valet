@@ -6,8 +6,8 @@ import cookie from "@fastify/cookie";
 import { env } from "./env.ts";
 import { prefetchPriorities } from "./cache.ts";
 import { setRunnerSocket, catchUpIfNeeded } from "./runner-link.ts";
-import { addDashboardClient, getStatus, getOrderHistory } from "./dashboard-link.ts";
-import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement } from "./tools.ts";
+import { addDashboardClient, getStatus, getOrderHistory, broadcastStatus } from "./dashboard-link.ts";
+import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement, toolOrder, recordAnswer } from "./tools.ts";
 import { registerDeskRoutes } from "./desk.ts";
 import { registerAuthRoutes, requireAuth } from "./auth.ts";
 import { onCallStarted, isCallerAllowed, onCallActiveStatus, onCallEnded } from "./call-guard.ts";
@@ -59,6 +59,35 @@ app.get("/api/push/vapid-public-key", { preHandler: requireAuth }, async () => (
 app.post("/api/push/subscribe", { preHandler: requireAuth }, async (req) => {
   // single-account tool — this is the one user row, no need to look up who's asking.
   await sql`update users set push_subscription = ${JSON.stringify(req.body)}`;
+  return { ok: true };
+});
+
+// in-app resolution for a blocked/failed job — the dashboard already knows exactly which card
+// this is, so unlike the voice path there's no disambiguation to do at all, which makes this
+// strictly more reliable than answering by phone for the same job.
+app.post("/api/jobs/:id/answer", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const { answer } = req.body as { answer?: string };
+  if (!answer) return reply.code(400).send({ error: "answer required" });
+  const [job] = await sql`select id from jobs where id = ${id} and status = 'blocked'`;
+  if (!job) return reply.code(404).send({ error: "no blocked job with that id" });
+  const message = await recordAnswer(id, answer);
+  return { message };
+});
+
+app.post("/api/jobs/:id/retry", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const [job] = await sql`select ticket_id from jobs where id = ${id} and status in ('failed', 'timeout')`;
+  if (!job) return reply.code(404).send({ error: "no failed/timed-out job with that id" });
+  const message = await toolOrder(job.ticket_id);
+  return { message };
+});
+
+app.post("/api/jobs/:id/dismiss", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const result = await sql`update jobs set delivered_at = now() where id = ${id} and status in ('done', 'failed', 'timeout') returning id`;
+  if (result.length === 0) return reply.code(404).send({ error: "no terminal job with that id" });
+  broadcastStatus();
   return { ok: true };
 });
 

@@ -31,7 +31,10 @@ body {
 .page {
   max-width: 640px;
   margin: 0 auto;
-  padding: 24px 16px 64px;
+  /* env(safe-area-inset-*) is 0 on anything without a notch/home-indicator, so this is a no-op
+     everywhere except installed standalone on iOS — see index.html's viewport-fit=cover. */
+  padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(64px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
 }
 
 h1 {
@@ -125,15 +128,85 @@ a.job-ticket:hover { text-decoration: underline; }
   color: var(--accent);
 }
 
+.job-answer-form {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.job-answer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.job-answer-form button,
+.job-error-actions button {
+  background: var(--card-hover);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.job-answer-form button:hover:not(:disabled),
+.job-error-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.job-answer-form button:disabled,
+.job-error-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.job-answer-form form {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.job-answer-form input {
+  flex: 1;
+  min-width: 0; /* a flex item's default min-width:auto fights the parent's wrap, overflowing narrow screens */
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 16px; /* prevents iOS Safari's auto-zoom-on-focus, same as the auth form */
+}
+
+.job-error-actions {
+  margin-top: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.job-dismiss {
+  color: var(--muted);
+}
+
+.job-answer-error {
+  font-size: 12px;
+  color: var(--warn);
+}
+
 .page-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
 .who {
   font-size: 13px;
   color: var(--muted);
+  overflow-wrap: break-word;
 }
 
 .runner-dot {
@@ -159,13 +232,16 @@ a.job-ticket:hover { text-decoration: underline; }
   justify-content: center;
   min-height: 100vh;
   flex-direction: column;
+  padding: var(--space-4);
+  padding-top: max(var(--space-4), env(safe-area-inset-top));
+  padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
 }
 
 .auth-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: 280px;
+  width: min(280px, 100%);
 }
 
 .auth-form input,
@@ -175,7 +251,9 @@ a.job-ticket:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--fg);
-  font-size: 14px;
+  /* 16px, not 14px: anything smaller makes iOS Safari auto-zoom the page on focus — jarring in
+     a standalone PWA with no browser chrome to zoom back out of. */
+  font-size: 16px;
 }
 
 .auth-form button {
@@ -276,6 +354,14 @@ a.job-ticket:hover { text-decoration: underline; }
   margin-bottom: 8px;
 }
 
+.table-scroll {
+  /* safety net, not the common case — .stats-table's columns are short enough to fit most
+     phones already; this just stops a genuinely narrow device from clipping content instead of
+     scrolling it. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .stats-table {
   width: 100%;
   border-collapse: collapse;
@@ -314,6 +400,7 @@ a.job-ticket:hover { text-decoration: underline; }
   justify-content: space-between;
   align-items: center;
   padding: var(--space-6) var(--space-8);
+  padding-top: max(var(--space-6), env(safe-area-inset-top));
 }
 
 .landing-wordmark {
@@ -340,6 +427,7 @@ a.job-ticket:hover { text-decoration: underline; }
   display: flex;
   align-items: flex-end;
   padding: var(--space-8);
+  padding-bottom: max(var(--space-8), env(safe-area-inset-bottom));
   overflow: hidden;
 }
 
@@ -515,7 +603,14 @@ a.job-ticket:hover { text-decoration: underline; }
 }
 
 @media (max-width: 560px) {
-  .landing-nav { padding: var(--space-4); }
-  .landing-hero { padding: var(--space-4); align-items: flex-end; }
+  .landing-nav { padding: var(--space-4); padding-top: max(var(--space-4), env(safe-area-inset-top)); }
+  .landing-hero { padding: var(--space-4); padding-bottom: max(var(--space-4), env(safe-area-inset-bottom)); align-items: flex-end; }
   .landing-section { padding: var(--space-6) var(--space-4); }
+
+  /* dashboard: .page already narrows gracefully on its own (max-width:640px, side padding), this
+     just tightens what doesn't — the header row and tab labels, which were sized for desktop. */
+  .page { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  h1 { font-size: 28px; margin-bottom: var(--space-4); }
+  .tabs { gap: 0; }
+  .tab { margin-right: var(--space-4); padding: var(--space-2) 2px; }
 }
