@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { api } from "./Auth.tsx";
+import { parseOptions } from "./parseOptions.ts";
 
 export type Job = {
   id: string;
@@ -27,14 +28,6 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const SPRING = { type: "spring" as const, stiffness: 260, damping: 28 };
-
-// matches the consistent "(1) X. (2) Y. Or tell me what you'd prefer." shape every blocked
-// question is phrased in (see runner/prompts/*.md) — gives real buttons when it parses, the
-// free-text box underneath always works regardless.
-function parseOptions(question: string): string[] {
-  const matches = [...question.matchAll(/\((\d+)\)\s*([^()]+?)(?=\s*\(\d+\)|\s*Or tell me|$)/g)];
-  return matches.map((m) => m[2].trim().replace(/\.$/, "")).filter(Boolean);
-}
 
 function BlockedAnswerForm({ jobId, options }: { jobId: string; options: string[] }) {
   const [text, setText] = useState("");

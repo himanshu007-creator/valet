@@ -317,6 +317,109 @@ a.job-ticket:hover { text-decoration: underline; }
   color: #f87171;
 }
 
+.desk-activity {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.task {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+}
+
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.task-actions button {
+  background: var(--card-hover);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.task-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.task-more {
+  margin-top: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.task-more input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 16px;
+}
+
+.task-reply {
+  margin-top: var(--space-2);
+}
+
+.task-reply-message {
+  font-size: 14px;
+  margin-bottom: var(--space-2);
+}
+
+/* menu overlay — History/Stats, one tap away instead of top-level tabs */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 20;
+}
+
+.overlay-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  width: min(640px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-4) max(var(--space-6), env(safe-area-inset-bottom));
+}
+
+.overlay-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.overlay-close {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+@media (min-width: 561px) {
+  .overlay { align-items: center; }
+  .overlay-panel { border-bottom: 1px solid var(--border); border-radius: var(--radius); }
+}
+
 .tabs {
   display: flex;
   gap: 4px;
@@ -551,6 +654,27 @@ a.job-ticket:hover { text-decoration: underline; }
   font-size: 13px;
   flex-shrink: 0;
 }
+
+.landing-section-glimpse { max-width: none; }
+.landing-section-glimpse > div { max-width: 860px; margin: 0 auto; }
+
+.landing-glimpse-sub {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+  max-width: 480px;
+  margin: calc(var(--space-6) * -1 + 4px) 0 var(--space-6);
+}
+
+.landing-glimpse {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.landing-glimpse-desk { pointer-events: none; }
+.landing-glimpse-orb { cursor: default; animation: landing-breathe 3s ease-in-out infinite; }
+
+.landing-glimpse-jobs { pointer-events: none; }
 
 .landing-journeys {
   display: grid;

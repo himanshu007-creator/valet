@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
 import { env, isAllowedOrigin } from "./env.ts";
 import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement } from "./tools.ts";
+import { broadcastDeskEvent } from "./dashboard-link.ts";
 
 // Auricle (web/) speaks plain OpenAI-compatible STT/chat/TTS, no tool calling of its own.
 // This is the proxy: one base URL, three routes, backed by Deepgram + Groq (with our tools
@@ -99,7 +100,9 @@ async function completeWithTools(messages: ChatMessage[]): Promise<string> {
     messages.push(message);
     for (const call of message.tool_calls as any[]) {
       const args = JSON.parse(call.function.arguments || "{}");
+      broadcastDeskEvent({ kind: "tool_call", name: call.function.name, args });
       const result = await runTool(call.function.name, args);
+      broadcastDeskEvent({ kind: "tool_result", name: call.function.name, result });
       messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: result });
     }
   }

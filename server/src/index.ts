@@ -8,6 +8,7 @@ import { prefetchPriorities } from "./cache.ts";
 import { setRunnerSocket, catchUpIfNeeded } from "./runner-link.ts";
 import { addDashboardClient, getStatus, getOrderHistory, broadcastStatus } from "./dashboard-link.ts";
 import { toolGetPriorities, toolHandleTask, toolAnswerQuestion, toolImplement, toolOrder, recordAnswer } from "./tools.ts";
+import { getCachedIssues } from "./cache.ts";
 import { registerDeskRoutes } from "./desk.ts";
 import { registerAuthRoutes, requireAuth } from "./auth.ts";
 import { onCallStarted, isCallerAllowed, onCallActiveStatus, onCallEnded } from "./call-guard.ts";
@@ -48,6 +49,19 @@ app.get("/api/priorities", { preHandler: requireAuth }, async () => {
 });
 
 app.get("/api/status", { preHandler: requireAuth }, async () => getStatus());
+
+// structured tickets for the Today tab's tap-to-act task list — same cache toolGetPriorities
+// already reads, just not collapsed down to prose first.
+app.get("/api/tasks", { preHandler: requireAuth }, async () => ({ tasks: await getCachedIssues() }));
+
+// the in-app equivalent of the voice `handle_task` tool — same function, so every intent,
+// confirmation (pendingDelete/pendingCreate/pendingExecute), and dispatch path it already has
+// works here for free, with nothing new to maintain per action.
+app.post("/api/handle_task", { preHandler: requireAuth }, async (req, reply) => {
+  const { request } = req.body as { request?: string };
+  if (!request) return reply.code(400).send({ error: "request required" });
+  return { message: await toolHandleTask(request) };
+});
 
 app.get("/api/stats", { preHandler: requireAuth }, async () => getStats());
 
