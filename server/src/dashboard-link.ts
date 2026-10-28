@@ -49,3 +49,14 @@ export async function broadcastStatus() {
     if (ws.readyState === ws.OPEN) ws.send(payload);
   }
 }
+
+// lets the Today tab see the desk voice agent's tool calls as they happen — reuses this same
+// authenticated socket rather than a second transport, and a distinct `type` keeps it from
+// colliding with the "status" message shape above.
+export function broadcastDeskEvent(event: { kind: "tool_call" | "tool_result"; name: string; args?: unknown; result?: string }) {
+  if (clients.size === 0) return;
+  const payload = JSON.stringify({ type: "desk_event", ...event });
+  for (const ws of clients) {
+    if (ws.readyState === ws.OPEN) ws.send(payload);
+  }
+}

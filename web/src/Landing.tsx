@@ -8,6 +8,8 @@ const JOURNEYS = [
   { verb: "Describe something new", example: "“We need a billing export — set it up.”" },
   { verb: "Check in", example: "“How's the auth ticket doing?”" },
   { verb: "Call it off", example: "“Cancel the billing one.”" },
+  { verb: "Mark it done", example: "“That one's finished.”" },
+  { verb: "Sharpen a ticket", example: "“Rename it, and add more detail.”" },
   { verb: "Get the shape of things", example: "“What's in progress?”" },
   { verb: "Decide, once", example: "A question, read aloud, answered in one line." },
 ];
@@ -85,6 +87,45 @@ export function Landing({ authed }: { authed: boolean }) {
               <p>You're called back only when there's a real decision, or it's genuinely done.</p>
             </motion.div>
           </motion.div>
+        </motion.div>
+      </section>
+
+      <section className="landing-section landing-section-glimpse">
+        <motion.div {...FADE_UP}>
+          <h2 className="landing-h2">See it live</h2>
+          <p className="landing-glimpse-sub">
+            This is the real Today tab — not a mockup. Ask by voice, watch it get picked up, tap a
+            ticket if talking isn't faster.
+          </p>
+          <div className="landing-glimpse">
+            <div className="desk landing-glimpse-desk">
+              <div className="desk-row">
+                <div className="desk-orb landing-glimpse-orb" />
+                <div>
+                  <div className="desk-state">listening</div>
+                  <div className="desk-text">Starting the auth ticket now — I'll call you when it's ready.</div>
+                  <div className="desk-heard">You said: start the auth one</div>
+                </div>
+              </div>
+            </div>
+            <ul className="jobs landing-glimpse-jobs">
+              <li className="job job-running">
+                <div className="job-head">
+                  <span className="job-ticket">HIM-14</span>
+                  <span className="job-status">Running</span>
+                </div>
+                <div className="job-title">Auth: session refresh on expiry</div>
+              </li>
+              <li className="job job-blocked">
+                <div className="job-head">
+                  <span className="job-ticket">HIM-9</span>
+                  <span className="job-status">Needs a decision</span>
+                </div>
+                <div className="job-title">Billing export</div>
+                <div className="job-question">Q: CSV or JSON for the export format?</div>
+              </li>
+            </ul>
+          </div>
         </motion.div>
       </section>
 
