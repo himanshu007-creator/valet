@@ -10,6 +10,7 @@ import { Stats } from "./Stats.tsx";
 import { useLenis } from "./useLenis.ts";
 import { PushToggle } from "./PushToggle.tsx";
 import { Landing } from "./Landing.tsx";
+import { RunnerPanel } from "./RunnerPanel.tsx";
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080";
 
@@ -102,14 +103,7 @@ function Dashboard({ username, token, onLogout }: { username: string; token: str
       <div className="page-head">
         <h1>VALET</h1>
         <div className="who">
-          {status.runnerOnline !== undefined && (
-            <span
-              className={`runner-dot ${status.runnerOnline ? "runner-online" : "runner-offline"}`}
-              title={status.runnerOnline ? "Runner on your Mac is connected" : "Runner on your Mac is not connected"}
-            >
-              ● {status.runnerOnline ? "Mac connected" : "Mac disconnected"}
-            </span>
-          )}
+          <RunnerPanel online={status.runnerOnline} />
           {" · "}
           {username} · <PushToggle /> ·{" "}
           <button className="link-button" onClick={() => openMenu("history")}>history</button> ·{" "}

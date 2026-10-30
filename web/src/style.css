@@ -209,13 +209,72 @@ a.job-ticket:hover { text-decoration: underline; }
   overflow-wrap: break-word;
 }
 
+.runner-panel {
+  position: relative;
+  display: inline-block;
+}
+
 .runner-dot {
   font-size: 11px;
   letter-spacing: 0.02em;
+  background: none;
+  border: none;
+  font-family: inherit;
+  padding: 0;
+  cursor: pointer;
 }
 
 .runner-online { color: var(--accent); }
 .runner-offline { color: #f87171; }
+
+.runner-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 15;
+  width: 260px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-3);
+  font-size: 12px;
+}
+
+.runner-popover-status {
+  margin: 0 0 var(--space-2);
+  color: var(--fg);
+  line-height: 1.4;
+}
+
+.runner-cmd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.runner-cmd-row code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.runner-cmd-row button {
+  flex-shrink: 0;
+  background: var(--card-hover);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.runner-cmd-row button:hover { border-color: var(--accent); color: var(--accent); }
 
 .link-button {
   background: none;

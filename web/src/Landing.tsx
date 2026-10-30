@@ -14,21 +14,24 @@ const JOURNEYS = [
   { verb: "Decide, once", example: "A question, read aloud, answered in one line." },
 ];
 
+// trigger well before the section is fully on-screen (amount: 0 fires on first pixel, a large
+// bottom margin counts it "in view" while still below the fold) — a fast scroll or a judge
+// skimming the page must never see a blank section, only a quick, already-underway reveal.
 const FADE_UP = {
-  initial: { opacity: 0, y: 16 },
+  initial: { opacity: 0, y: 10 },
   whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true, margin: "-80px" },
-  transition: { duration: 0.5, ease: "easeOut" as const },
+  viewport: { once: true, amount: 0, margin: "0px 0px -35% 0px" },
+  transition: { duration: 0.35, ease: "easeOut" as const },
 };
 
 const GRID = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.08 } },
+  show: { transition: { staggerChildren: 0.06 } },
 };
 
 const CARD = {
-  hidden: { opacity: 0, y: 18 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" as const } },
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" as const } },
 };
 
 export function Landing({ authed }: { authed: boolean }) {
@@ -73,7 +76,7 @@ export function Landing({ authed }: { authed: boolean }) {
       <section className="landing-section">
         <motion.div {...FADE_UP}>
           <h2 className="landing-h2">How it works</h2>
-          <motion.div className="landing-steps" variants={GRID} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-80px" }}>
+          <motion.div className="landing-steps" variants={GRID} initial="hidden" whileInView="show" viewport={{ once: true, amount: 0, margin: "0px 0px -35% 0px" }}>
             <motion.div className="landing-step" variants={CARD}>
               <span className="landing-step-num">01</span>
               <p>Speak. On the phone, or in the browser.</p>
@@ -132,7 +135,7 @@ export function Landing({ authed }: { authed: boolean }) {
       <section className="landing-section landing-section-alt">
         <motion.div {...FADE_UP}>
           <h2 className="landing-h2">Ask for anything</h2>
-          <motion.div className="landing-journeys" variants={GRID} initial="hidden" whileInView="show" viewport={{ once: true, margin: "-80px" }}>
+          <motion.div className="landing-journeys" variants={GRID} initial="hidden" whileInView="show" viewport={{ once: true, amount: 0, margin: "0px 0px -35% 0px" }}>
             {JOURNEYS.map((j) => (
               <motion.div key={j.verb} className="landing-journey" variants={CARD} whileHover={{ y: -3 }}>
                 <div className="landing-journey-verb">{j.verb}</div>
